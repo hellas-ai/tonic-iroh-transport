@@ -3,10 +3,10 @@
 use crate::{stream::IrohStream, server::service_to_alpn, Result};
 use http::Uri;
 use hyper_util::rt::TokioIo;
-use iroh_base::NodeAddr;
 use tonic::transport::{Channel, Endpoint};
 use tower::service_fn;
 use tracing::{debug, info};
+use iroh::NodeAddr;
 
 /// A typed client wrapper for connecting to gRPC services over iroh.
 /// 

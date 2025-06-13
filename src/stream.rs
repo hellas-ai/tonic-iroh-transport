@@ -1,6 +1,6 @@
 //! AsyncRead/AsyncWrite wrapper for iroh QUIC streams.
 
-use iroh_base::NodeId;
+use iroh::NodeId;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Instant;

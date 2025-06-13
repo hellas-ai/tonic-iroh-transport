@@ -12,7 +12,6 @@ categories = ["network-programming", "api-bindings"]
 [dependencies]
 # Core transport dependencies
 iroh = { git = "https://github.com/n0-computer/iroh.git", branch = "main" }
-iroh-base = { git = "https://github.com/n0-computer/iroh.git", branch = "main" }
 tonic = { version = "0.13", features = ["transport", "codegen", "prost"], default-features = false }
 
 # Async runtime and utilities
