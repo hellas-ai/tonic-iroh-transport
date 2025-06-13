@@ -10,7 +10,6 @@ keywords = ["grpc", "p2p", "iroh", "tonic", "transport"]
 categories = ["network-programming", "api-bindings"]
 
 [package.metadata.release]
-exclude = ["examples/*"]
 allow-branch = ["master"]
 pre-release-hook = ["make", "all"]
 
