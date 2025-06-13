@@ -54,15 +54,7 @@ impl GrpcProtocolHandler {
     where 
         T: tonic::server::NamedService,
     {
-        let service_name = T::NAME.to_string();
-        let (incoming, sender) = IrohIncoming::new();
-        
-        let handler = Self {
-            sender,
-            service_name,
-        };
-        
-        (handler, incoming)
+        Self::with_service_name(T::NAME)
     }
 
     /// Create a new GrpcProtocolHandler with a custom service name.
@@ -181,24 +173,35 @@ mod tests {
         assert_eq!(handler.service_name(), "test-service");
     }
 
-    struct MockEchoService;
-    impl tonic::server::NamedService for MockEchoService {
-        const NAME: &'static str = "echo.Echo";
-    }
-
-    struct MockChatService;
-    impl tonic::server::NamedService for MockChatService {
-        const NAME: &'static str = "p2p_chat.P2PChatService";
+    struct MockService;
+    impl tonic::server::NamedService for MockService {
+        const NAME: &'static str = "test.Service";
     }
 
     #[test]
     fn test_alpn_generation() {
         assert_eq!(
-            service_to_alpn::<MockEchoService>(),
+            service_to_alpn::<MockService>(),
+            b"/test.Service/1.0"
+        );
+        
+        // Test different service names by creating inline types
+        struct EchoService;
+        impl tonic::server::NamedService for EchoService {
+            const NAME: &'static str = "echo.Echo";
+        }
+        
+        struct ChatService;
+        impl tonic::server::NamedService for ChatService {
+            const NAME: &'static str = "p2p_chat.P2PChatService";
+        }
+        
+        assert_eq!(
+            service_to_alpn::<EchoService>(),
             b"/echo.Echo/1.0"
         );
         assert_eq!(
-            service_to_alpn::<MockChatService>(),
+            service_to_alpn::<ChatService>(),
             b"/p2p_chat.P2PChatService/1.0"
         );
     }

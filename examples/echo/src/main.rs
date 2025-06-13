@@ -2,14 +2,12 @@ use anyhow::Result;
 use tonic::{Request, Response, Status};
 use tonic::transport::Server;
 use tracing::info;
+use iroh::NodeAddr;
+use pb::echo::{echo_server::{Echo, EchoServer}, echo_client::EchoClient, EchoRequest, EchoResponse};
+use tonic_iroh_transport::{GrpcProtocolHandler, IrohClient, IrohPeerInfo};
 
 // Generated protobuf code
 mod pb;
-
-use iroh::{NodeId, NodeAddr};
-use pb::echo::{echo_server::{Echo, EchoServer}, echo_client::EchoClient, EchoRequest, EchoResponse};
-use tonic_iroh_transport::{connect_with_alpn, GrpcProtocolHandler, IrohPeerInfo, service_to_alpn};
-use std::str::FromStr;
 
 // Simple echo service implementation
 #[derive(Clone)]
@@ -38,24 +36,24 @@ impl Echo for EchoService {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    // Create iroh endpoint
-    let endpoint = iroh::Endpoint::builder().bind().await?;
-    let node_id = endpoint.node_id();
+    // Create server endpoint
+    let server_endpoint = iroh::Endpoint::builder().bind().await?;
+    let server_node_id = server_endpoint.node_id();
     
-    info!("Node ID: {}", node_id);
-    info!("Local addresses: {:?}", endpoint.bound_sockets());
+    info!("Server Node ID: {}", server_node_id);
+    info!("Server Local addresses: {:?}", server_endpoint.bound_sockets());
 
-    // Set up echo service - the new ergonomic way!
+    // Set up echo service
     let (handler, incoming, alpn) = GrpcProtocolHandler::for_service::<EchoServer<EchoService>>();
     
     info!("Echo server started on protocol: {}", String::from_utf8_lossy(&alpn));
     
-    let _router = iroh::protocol::Router::builder(endpoint.clone())
+    let _router = iroh::protocol::Router::builder(server_endpoint.clone())
         .accept(alpn, handler)
         .spawn();
 
     // Spawn server in background
-    tokio::spawn(async move {
+    let server_handle = tokio::spawn(async move {
         let server = Server::builder()
             .add_service(EchoServer::new(EchoService))
             .serve_with_incoming(incoming);
@@ -64,40 +62,49 @@ async fn main() -> Result<()> {
         }
     });
 
-    // Example: connect to yourself (for demo)
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() > 1 && args[1] == "client" {
-        // If run with "client" argument, act as client
-        if args.len() < 3 {
-            eprintln!("Usage: {} client <node_id> [address] [message]", args[0]);
-            std::process::exit(1);
-        }
-        
-        let target_node_id = NodeId::from_str(&args[2])?;
-        let target_addr = if args.len() > 3 {
-            NodeAddr::new(target_node_id).with_direct_addresses([args[3].parse()?])
-        } else {
-            NodeAddr::new(target_node_id)
-        };
-        let message = args.get(4).cloned().unwrap_or_else(|| "Hello, World!".to_string());
+    // Give the server a moment to start up
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-        info!("Connecting to: {:?}", target_addr);
-        
-        let alpn = service_to_alpn::<EchoServer<EchoService>>();
-        let channel = connect_with_alpn(endpoint, target_addr, &alpn).await?;
-        let mut client = EchoClient::new(channel);
+    // Create client endpoint
+    let client_endpoint = iroh::Endpoint::builder().bind().await?;
+    info!("Client Node ID: {}", client_endpoint.node_id());
 
-        let request = Request::new(EchoRequest { message });
+    // Connect to the server
+    let server_addr = if let Some(socket_addr) = server_endpoint.bound_sockets().first() {
+        NodeAddr::new(server_node_id).with_direct_addresses([*socket_addr])
+    } else {
+        NodeAddr::new(server_node_id)
+    };
+    
+    info!("Connecting to server at: {:?}", server_addr);
+    
+    let iroh_client = IrohClient::new(client_endpoint);
+    let channel = iroh_client.connect_to_service::<EchoServer<EchoService>>(server_addr).await?;
+    let mut client = EchoClient::new(channel);
+
+    // Test a few echo calls
+    let messages = vec![
+        "Hello, World!",
+        "This is a test message",
+        "Echo demo working!",
+    ];
+
+    for message in messages {
+        info!("Sending: '{}'", message);
+        let request = Request::new(EchoRequest { 
+            message: message.to_string() 
+        });
+        
         let response = client.echo(request).await?;
         let resp = response.into_inner();
         
-        info!("Echo response: '{}' from peer: {}", resp.message, resp.peer_id);
-        return Ok(());
+        info!("✅ Echo response: '{}' from peer: {}", resp.message, resp.peer_id);
     }
 
-    // Run server indefinitely
-    tokio::signal::ctrl_c().await?;
-    info!("Shutting down...");
+    info!("Echo demo completed successfully!");
+
+    // Shutdown
+    server_handle.abort();
     
     Ok(())
 }

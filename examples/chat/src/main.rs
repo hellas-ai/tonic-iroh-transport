@@ -20,7 +20,7 @@ use pb::p2p_chat::{
     *,
 };
 
-use tonic_iroh_transport::{connect_with_alpn, GrpcProtocolHandler, IrohChannel, IrohPeerInfo, service_to_alpn};
+use tonic_iroh_transport::{GrpcProtocolHandler, IrohChannel, IrohClient, IrohPeerInfo};
 use iroh::{NodeAddr, NodeId, SecretKey};
 
 #[derive(Parser)]
@@ -484,12 +484,10 @@ async fn connect_and_execute_command(
 
     let local_node_id = endpoint.node_id().to_string();
     
-    // Create separate channels for each service with correct ALPN protocols
-    let chat_alpn = service_to_alpn::<P2pChatServiceServer<ChatServiceImpl>>();
-    let node_alpn = service_to_alpn::<NodeServiceServer<NodeServiceImpl>>();
-    let chat_channel = connect_with_alpn(endpoint.clone(), target_addr.clone(), &chat_alpn).await?;
-    let node_channel = connect_with_alpn(endpoint, target_addr, &node_alpn).await?;
-    
+    // Create typed clients using IrohClient
+    let iroh_client = IrohClient::new(endpoint);
+    let chat_channel = iroh_client.connect_to_service::<P2pChatServiceServer<ChatServiceImpl>>(target_addr.clone()).await?;
+    let node_channel = iroh_client.connect_to_service::<NodeServiceServer<NodeServiceImpl>>(target_addr).await?;
     let mut chat_client = P2pChatServiceClient::new(chat_channel);
     let mut node_client = NodeServiceClient::new(node_channel);
 

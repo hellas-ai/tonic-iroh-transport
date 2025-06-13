@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 use tokio::time::timeout;
-use tonic_iroh_transport::{GrpcProtocolHandler, IrohStream};
+use tonic_iroh_transport::{GrpcProtocolHandler, IrohClient, IrohStream};
 use iroh::protocol::AcceptError;
 
 /// Test that we can create two iroh endpoints and establish a connection
@@ -88,6 +88,19 @@ async fn test_grpc_protocol_handler_typed() {
     
     // If we get here, the basic creation works
     assert!(true);
+}
+
+/// Test creating an IrohClient
+#[tokio::test]
+async fn test_iroh_client() {
+    // Create an endpoint for testing
+    let endpoint = iroh::Endpoint::builder().bind().await.unwrap();
+    
+    // Create IrohClient
+    let client = IrohClient::new(endpoint.clone());
+    
+    // Verify we can access the endpoint
+    assert_eq!(client.endpoint().node_id(), endpoint.node_id());
 }
 
 // Mock protocol handler for testing

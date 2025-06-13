@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Transport layer for using tonic gRPC over iroh p2p connections"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/n0-computer/tonic-iroh"
+repository = "https://github.com/hellas-ai/tonic-iroh"
 keywords = ["grpc", "p2p", "iroh", "tonic", "transport"]
 categories = ["network-programming", "api-bindings"]
 
@@ -50,6 +50,8 @@ tokio-test = "0.4"
 tracing-subscriber = "0.3"
 anyhow = "1.0"
 async-trait = "0.1"
+test-log = "0.2"
+
 # Example dependencies
 clap = { version = "4.0", features = ["derive"] }
 prost = "0.13"
