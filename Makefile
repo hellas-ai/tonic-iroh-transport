@@ -1,7 +1,7 @@
 .PHONY: all build check lint test examples clean install-tools help
 
 # Default target
-all: check-all lint-all test-all build examples
+all: check-all lint-all test-all doc-check-all build examples
 
 # Build the main crate
 build:
@@ -32,6 +32,21 @@ fmt-check:
 lint:
 	@echo "Linting main crate..."
 	cargo clippy -- -D warnings
+
+# Generate documentation
+doc:
+	@echo "Generating docs for main crate..."
+	cargo doc --no-deps
+
+# Generate documentation with dependencies
+doc-full:
+	@echo "Generating docs for main crate with dependencies..."
+	cargo doc
+
+# Check documentation builds without warnings
+doc-check:
+	@echo "Checking docs for main crate..."
+	cargo doc --no-deps --document-private-items
 
 # Run tests
 test:
@@ -78,6 +93,20 @@ lint-examples:
 	@echo "Linting echo example..."
 	cd examples/echo && cargo clippy -- -D warnings
 
+# Generate docs for examples
+doc-examples:
+	@echo "Generating docs for chat example..."
+	cd examples/chat && cargo doc --no-deps
+	@echo "Generating docs for echo example..."
+	cd examples/echo && cargo doc --no-deps
+
+# Check docs for examples
+doc-check-examples:
+	@echo "Checking docs for chat example..."
+	cd examples/chat && cargo doc --no-deps --document-private-items
+	@echo "Checking docs for echo example..."
+	cd examples/echo && cargo doc --no-deps --document-private-items
+
 # Full check including examples
 check-all: check check-examples
 
@@ -86,6 +115,12 @@ lint-all: lint lint-examples
 
 # Full test including examples
 test-all: test test-examples
+
+# Full doc generation including examples
+doc-all: doc doc-examples
+
+# Full doc check including examples
+doc-check-all: doc-check doc-check-examples
 
 # Clean build artifacts
 clean:
@@ -102,7 +137,7 @@ install-tools:
 	rustup component add rustfmt clippy
 
 # Run comprehensive checks
-ci: fmt-check lint-all test-all build examples
+ci: fmt-check lint-all test-all doc-check-all build examples
 
 # Development workflow
 dev: fmt check lint test
@@ -125,10 +160,17 @@ help:
 	@echo "  test-verbose     - Run tests with output"
 	@echo "  test-all         - Run tests for main crate and examples"
 	@echo "  test-examples    - Run tests for examples only"
+	@echo "  doc              - Generate docs for main crate"
+	@echo "  doc-full         - Generate docs for main crate with dependencies"
+	@echo "  doc-check        - Check docs build for main crate"
+	@echo "  doc-all          - Generate docs for main crate and examples"
+	@echo "  doc-check-all    - Check docs build for main crate and examples"
+	@echo "  doc-examples     - Generate docs for examples only"
+	@echo "  doc-check-examples - Check docs build for examples only"
 	@echo "  examples         - Build examples"
 	@echo "  examples-release - Build examples in release mode"
 	@echo "  clean            - Clean build artifacts"
 	@echo "  install-tools    - Install development tools (rustfmt, clippy)"
-	@echo "  ci               - Run comprehensive checks (fmt-check, lint-all, test-all, build, examples)"
+	@echo "  ci               - Run comprehensive checks (fmt-check, lint-all, test-all, doc-check-all, build, examples)"
 	@echo "  dev              - Development workflow (fmt, check, lint, test)"
 	@echo "  help             - Show this help message"

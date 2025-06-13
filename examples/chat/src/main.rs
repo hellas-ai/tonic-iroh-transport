@@ -210,7 +210,7 @@ impl P2pChatService for ChatServiceImpl {
         let count = self.state.request_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
         if let Some(max) = self.state.max_requests {
             if count >= max {
-                println!("Processed {} requests, triggering graceful shutdown", count);
+                println!("Processed {count} requests, triggering graceful shutdown");
                 let _ = self.state.shutdown_tx.send(());
             }
         }
@@ -437,7 +437,7 @@ async fn main() -> Result<()> {
     let endpoint = endpoint_builder.bind().await?;
     let node_id = endpoint.node_id().to_string();
     
-    println!("Node ID: {}", node_id);
+    println!("Node ID: {node_id}");
     
     let local_addrs = endpoint.bound_sockets();
     if let Some(socket_addr) = local_addrs.first() {
@@ -837,7 +837,7 @@ async fn benchmark_messages(
     duration_secs: u64,
     max_concurrent: usize,
 ) -> Result<()> {
-    println!("Starting benchmark: {} seconds, max {} concurrent messages", duration_secs, max_concurrent);
+    println!("Starting benchmark: {duration_secs} seconds, max {max_concurrent} concurrent messages");
     
     let start_time = std::time::Instant::now();
     let duration = std::time::Duration::from_secs(duration_secs);
@@ -914,10 +914,10 @@ async fn benchmark_messages(
     
     println!("=== Benchmark Results ===");
     println!("Duration: {:.2}s", elapsed.as_secs_f64());
-    println!("Total messages: {}", message_count);
-    println!("Successful: {} ({:.1}%)", success_count, success_rate);
-    println!("Errors: {}", error_count);
-    println!("Messages/sec: {:.2}", messages_per_sec);
+    println!("Total messages: {message_count}");
+    println!("Successful: {success_count} ({success_rate:.1}%)");
+    println!("Errors: {error_count}");
+    println!("Messages/sec: {messages_per_sec:.2}");
     println!("Avg latency: {:.2}ms", elapsed.as_millis() as f64 / message_count as f64);
     
     Ok(())
