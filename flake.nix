@@ -28,6 +28,7 @@
             cargo-expand
             cargo-udeps
             cargo-outdated
+            cargo-release
             protobuf
           ];
 
