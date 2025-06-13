@@ -9,6 +9,17 @@ A transport layer that enables [tonic](https://github.com/hyperium/tonic) gRPC s
 - **Service multiplexing**: Multiple gRPC services over the same P2P connection
 - **Type safety**: Full integration with tonic's generated clients and servers
 
+## How it Works
+
+```
+gRPC Client ←→ tonic-iroh-transport ←→ gRPC Server
+                       ↓
+               iroh P2P Network
+            (QUIC + NAT traversal)
+```
+
+The transport layer bridges HTTP/2 gRPC streams with QUIC streams, enabling standard tonic applications to communicate directly peer-to-peer without requiring a centralized server.
+
 ## Quick Start
 
 Add to your `Cargo.toml`:
