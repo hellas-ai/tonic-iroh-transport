@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package p2p_chat;
+
+// Common message types shared across services
+message Empty {}
+
+// Connection and peer information
+message PeerInfo {
+  string node_id = 1;
+  repeated string addresses = 2;
+  int64 connected_since = 3;
+  ConnectionType connection_type = 4;
+}
+
+enum ConnectionType {
+  DIRECT = 0;
+  RELAY = 1;
+  UNKNOWN = 2;
+}

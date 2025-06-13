@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package p2p_chat;
+
+import "common.proto";
+
+// Node discovery and health service
+service NodeService {
+  // Get information about this node
+  rpc GetNodeInfo(Empty) returns (NodeInfo);
+  
+  // Ping for connectivity testing
+  rpc Ping(PingRequest) returns (PingResponse);
+  
+  // List connected peers
+  rpc ListPeers(Empty) returns (ListPeersResponse);
+}
+
+// Node information and health messages
+message NodeInfo {
+  string node_id = 1;
+  repeated string addresses = 2;
+  string version = 3;
+  int64 uptime_seconds = 4;
+  int32 connected_peers = 5;
+}
+
+message PingRequest {
+  int64 timestamp = 1;
+  string data = 2;
+}
+
+message PingResponse {
+  int64 request_timestamp = 1;
+  int64 response_timestamp = 2;
+  string echo_data = 3;
+}
+
+message ListPeersResponse {
+  repeated PeerInfo peers = 1;
+}

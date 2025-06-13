@@ -11,7 +11,7 @@ path = "src/main.rs"
 # Core dependencies
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "net", "io-util"] }
 tokio-stream = "0.1"
-tonic = { version = "0.13", features = ["transport", "codegen", "prost"], default-features = false }
+tonic = { version = "0.13", features = ["prost"] }
 prost = "0.13"
 iroh = { git = "https://github.com/n0-computer/iroh.git", branch = "main" }
 
@@ -25,9 +25,10 @@ anyhow = "1.0"
 clap = { version = "4.0", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
+async-trait = "0.1"
 
 [build-dependencies]
-tonic-build = { path = "../../vendor/tonic/tonic-build" }
+tonic-build = "0.13"
 
 [dev-dependencies]
 tokio-test = "0.4"

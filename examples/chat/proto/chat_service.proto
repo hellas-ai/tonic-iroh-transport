@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package p2p_chat;
+
+import "common.proto";
+
+// P2P Chat Service - demonstrates both unary and streaming RPC patterns
+service P2PChatService {
+  // Send a message to a peer
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+  
+  // Subscribe to incoming messages (server streaming)
+  rpc SubscribeMessages(SubscribeRequest) returns (stream Message);
+  
+  // Get chat history between peers
+  rpc GetHistory(GetHistoryRequest) returns (GetHistoryResponse);
+  
+  // Bi-directional chat stream
+  rpc ChatStream(stream Message) returns (stream Message);
+}
+
+// Chat-specific messages
+message SendMessageRequest {
+  string recipient_id = 1;
+  string content = 2;
+  int64 timestamp = 3;
+}
+
+message SendMessageResponse {
+  bool success = 1;
+  string error = 2;
+  string message_id = 3;
+}
+
+message SubscribeRequest {
+  // Empty for now - could add filters in the future
+}
+
+message Message {
+  string id = 1;
+  string sender_id = 2;
+  string recipient_id = 3;
+  string content = 4;
+  int64 timestamp = 5;
+  MessageType type = 6;
+}
+
+enum MessageType {
+  TEXT = 0;
+  SYSTEM = 1;
+  HEARTBEAT = 2;
+}
+
+message GetHistoryRequest {
+  string peer_id = 1;
+  int32 limit = 2;
+  int64 before_timestamp = 3;
+}
+
+message GetHistoryResponse {
+  repeated Message messages = 1;
+  bool has_more = 2;
+}

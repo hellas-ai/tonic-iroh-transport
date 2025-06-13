@@ -4,13 +4,11 @@ use tonic::transport::Server;
 use tracing::info;
 
 // Generated protobuf code
-pub mod echo {
-    tonic::include_proto!("echo");
-}
+mod pb;
 
 use iroh::{NodeId, NodeAddr};
-use echo::{echo_server::{Echo, EchoServer}, echo_client::EchoClient, EchoRequest, EchoResponse};
-use tonic_iroh_transport::{connect_with_alpn, GrpcProtocolHandler, IrohPeerInfo};
+use pb::echo::{echo_server::{Echo, EchoServer}, echo_client::EchoClient, EchoRequest, EchoResponse};
+use tonic_iroh_transport::{connect_with_alpn, GrpcProtocolHandler, IrohPeerInfo, service_to_alpn};
 use std::str::FromStr;
 
 // Simple echo service implementation
@@ -47,25 +45,24 @@ async fn main() -> Result<()> {
     info!("Node ID: {}", node_id);
     info!("Local addresses: {:?}", endpoint.bound_sockets());
 
-    // Set up echo service
-    let (handler, incoming) = GrpcProtocolHandler::new("echo");
+    // Set up echo service - the new ergonomic way!
+    let (handler, incoming, alpn) = GrpcProtocolHandler::for_service::<EchoServer<EchoService>>();
+    
+    info!("Echo server started on protocol: {}", String::from_utf8_lossy(&alpn));
+    
     let _router = iroh::protocol::Router::builder(endpoint.clone())
-        .accept(b"/echo/1.0", handler)
+        .accept(alpn, handler)
         .spawn();
 
-    let echo_service = EchoService;
-    
     // Spawn server in background
     tokio::spawn(async move {
         let server = Server::builder()
-            .add_service(EchoServer::new(echo_service))
+            .add_service(EchoServer::new(EchoService))
             .serve_with_incoming(incoming);
         if let Err(e) = server.await {
             eprintln!("Server error: {}", e);
         }
     });
-
-    info!("Echo server started on protocol: /echo/1.0");
 
     // Example: connect to yourself (for demo)
     let args: Vec<String> = std::env::args().collect();
@@ -86,7 +83,8 @@ async fn main() -> Result<()> {
 
         info!("Connecting to: {:?}", target_addr);
         
-        let channel = connect_with_alpn(endpoint, target_addr, b"/echo/1.0").await?;
+        let alpn = service_to_alpn::<EchoServer<EchoService>>();
+        let channel = connect_with_alpn(endpoint, target_addr, &alpn).await?;
         let mut client = EchoClient::new(channel);
 
         let request = Request::new(EchoRequest { message });

@@ -10,11 +10,9 @@ use tonic::{Request, Response, Status, Streaming};
 use tonic::transport::Server;
 use tracing::{info, warn, error};
 
-pub mod p2p_chat {
-    tonic::include_proto!("p2p_chat");
-}
+mod pb;
 
-use p2p_chat::{
+use pb::p2p_chat::{
     node_service_client::NodeServiceClient,
     node_service_server::{NodeService, NodeServiceServer},
     p2p_chat_service_client::P2pChatServiceClient,
@@ -22,7 +20,7 @@ use p2p_chat::{
     *,
 };
 
-use tonic_iroh_transport::{connect_with_alpn, GrpcProtocolHandler, IrohChannel, IrohPeerInfo};
+use tonic_iroh_transport::{connect_with_alpn, GrpcProtocolHandler, IrohChannel, IrohPeerInfo, service_to_alpn};
 use iroh::{NodeAddr, NodeId, SecretKey};
 
 #[derive(Parser)]
@@ -406,26 +404,31 @@ async fn main() -> Result<()> {
     let chat_service = ChatServiceImpl::new(chat_state.clone());
     let node_service = NodeServiceImpl::new(chat_state);
 
-    let (chat_handler, chat_incoming) = GrpcProtocolHandler::new("chat");
-    let (node_handler, node_incoming) = GrpcProtocolHandler::new("node");
+    let (chat_handler, chat_incoming, chat_alpn) = GrpcProtocolHandler::for_service::<P2pChatServiceServer<ChatServiceImpl>>();
+    let (node_handler, node_incoming, node_alpn) = GrpcProtocolHandler::for_service::<NodeServiceServer<NodeServiceImpl>>();
 
     let endpoint_for_client = endpoint.clone();
     
-    let router = iroh::protocol::Router::builder(endpoint)
-        .accept(b"/grpc/chat/1.0", chat_handler)
-        .accept(b"/grpc/node/1.0", node_handler)
-        .spawn();
-
-    let chat_server = Server::builder()
-        .serve_with_incoming(P2pChatServiceServer::new(chat_service), chat_incoming);
-        
-    let node_server = Server::builder()
-        .serve_with_incoming(NodeServiceServer::new(node_service), node_incoming);
-
+    // Log the protocols before moving
     info!("P2P Chat Node started successfully");
     info!("Available protocols:");
-    info!("  - Chat Service: /grpc/chat/1.0");
-    info!("  - Node Service: /grpc/node/1.0");
+    info!("  - Chat Service: {}", String::from_utf8_lossy(&chat_alpn));
+    info!("  - Node Service: {}", String::from_utf8_lossy(&node_alpn));
+
+    let router = iroh::protocol::Router::builder(endpoint)
+        .accept(chat_alpn, chat_handler)
+        .accept(node_alpn, node_handler)
+        .spawn();
+
+    // Spawn chat server
+    let chat_server = Server::builder()
+        .add_service(P2pChatServiceServer::new(chat_service))
+        .serve_with_incoming(chat_incoming);
+        
+    // Spawn node server
+    let node_server = Server::builder()
+        .add_service(NodeServiceServer::new(node_service))
+        .serve_with_incoming(node_incoming);
 
     if let Some(target_node_id) = args.connect_to {
         let endpoint_clone = endpoint_for_client.clone();
@@ -482,8 +485,10 @@ async fn connect_and_execute_command(
     let local_node_id = endpoint.node_id().to_string();
     
     // Create separate channels for each service with correct ALPN protocols
-    let chat_channel = connect_with_alpn(endpoint.clone(), target_addr.clone(), b"/grpc/chat/1.0").await?;
-    let node_channel = connect_with_alpn(endpoint, target_addr, b"/grpc/node/1.0").await?;
+    let chat_alpn = service_to_alpn::<P2pChatServiceServer<ChatServiceImpl>>();
+    let node_alpn = service_to_alpn::<NodeServiceServer<NodeServiceImpl>>();
+    let chat_channel = connect_with_alpn(endpoint.clone(), target_addr.clone(), &chat_alpn).await?;
+    let node_channel = connect_with_alpn(endpoint, target_addr, &node_alpn).await?;
     
     let mut chat_client = P2pChatServiceClient::new(chat_channel);
     let mut node_client = NodeServiceClient::new(node_channel);

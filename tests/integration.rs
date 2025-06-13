@@ -67,8 +67,24 @@ async fn test_iroh_connection() {
 /// Test creating a GrpcProtocolHandler
 #[tokio::test]
 async fn test_grpc_protocol_handler() {
-    // GrpcProtocolHandler::new expects a service name string
-    let (_handler, _incoming) = GrpcProtocolHandler::new("test.MockService");
+    // Test with_service_name method
+    let (_handler, _incoming) = GrpcProtocolHandler::with_service_name("test.MockService");
+    
+    // If we get here, the basic creation works
+    assert!(true);
+}
+
+/// Mock service for testing GrpcProtocolHandler::new()
+struct MockService;
+impl tonic::server::NamedService for MockService {
+    const NAME: &'static str = "test.MockService";
+}
+
+/// Test creating a GrpcProtocolHandler with type parameter
+#[tokio::test] 
+async fn test_grpc_protocol_handler_typed() {
+    // Test the new() method with a type parameter
+    let (_handler, _incoming) = GrpcProtocolHandler::new::<MockService>();
     
     // If we get here, the basic creation works
     assert!(true);

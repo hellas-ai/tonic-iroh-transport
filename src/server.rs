@@ -46,11 +46,30 @@ pub struct GrpcProtocolHandler {
 }
 
 impl GrpcProtocolHandler {
-    /// Create a new GrpcProtocolHandler.
+    /// Create a new GrpcProtocolHandler for a specific tonic service.
     ///
     /// Returns the handler and an IrohIncoming stream that should be passed to 
     /// `Server::builder().add_service(...).serve_with_incoming(incoming)`.
-    pub fn new(service_name: impl Into<String>) -> (Self, IrohIncoming) {
+    pub fn new<T>() -> (Self, IrohIncoming) 
+    where 
+        T: tonic::server::NamedService,
+    {
+        let service_name = T::NAME.to_string();
+        let (incoming, sender) = IrohIncoming::new();
+        
+        let handler = Self {
+            sender,
+            service_name,
+        };
+        
+        (handler, incoming)
+    }
+
+    /// Create a new GrpcProtocolHandler with a custom service name.
+    /// 
+    /// Use this only if you need to override the service name for some reason.
+    /// Prefer `new()` which automatically derives the name from the tonic service.
+    pub fn with_service_name(service_name: impl Into<String>) -> (Self, IrohIncoming) {
         let service_name = service_name.into();
         let (incoming, sender) = IrohIncoming::new();
         
@@ -60,6 +79,19 @@ impl GrpcProtocolHandler {
         };
         
         (handler, incoming)
+    }
+    
+    /// Create a new GrpcProtocolHandler for a specific tonic service with automatic ALPN.
+    ///
+    /// Returns the handler, incoming stream, and the ALPN protocol bytes.
+    /// This is a convenience method that combines protocol generation with handler creation.
+    pub fn for_service<T>() -> (Self, IrohIncoming, Vec<u8>) 
+    where 
+        T: tonic::server::NamedService,
+    {
+        let (handler, incoming) = Self::new::<T>();
+        let alpn = service_to_alpn::<T>();
+        (handler, incoming, alpn)
     }
     
     /// Get the service name for debugging.
@@ -129,13 +161,45 @@ impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
     }
 }
 
+/// Generate ALPN protocol from tonic service name.
+/// 
+/// Converts "echo.Echo" -> "/echo.Echo/1.0"
+/// Converts "p2p_chat.P2PChatService" -> "/p2p_chat.P2PChatService/1.0"  
+pub fn service_to_alpn<T: tonic::server::NamedService>() -> Vec<u8> {
+    let service_name = T::NAME;
+    format!("/{}/1.0", service_name).into_bytes()
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_handler_creation() {
-        let (handler, _incoming) = GrpcProtocolHandler::new("test-service");
+        let (handler, _incoming) = GrpcProtocolHandler::with_service_name("test-service");
         assert_eq!(handler.service_name(), "test-service");
+    }
+
+    struct MockEchoService;
+    impl tonic::server::NamedService for MockEchoService {
+        const NAME: &'static str = "echo.Echo";
+    }
+
+    struct MockChatService;
+    impl tonic::server::NamedService for MockChatService {
+        const NAME: &'static str = "p2p_chat.P2PChatService";
+    }
+
+    #[test]
+    fn test_alpn_generation() {
+        assert_eq!(
+            service_to_alpn::<MockEchoService>(),
+            b"/echo.Echo/1.0"
+        );
+        assert_eq!(
+            service_to_alpn::<MockChatService>(),
+            b"/p2p_chat.P2PChatService/1.0"
+        );
     }
 }
