@@ -15,11 +15,13 @@ fn error_to_io<E: std::error::Error + Send + Sync + 'static>(
     std::io::Error::new(kind, e)
 }
 
-/// Peer information for iroh connections.
+/// Rich context information for iroh connections.
 #[derive(Debug, Clone)]
-pub struct IrohPeerInfo {
+pub struct IrohContext {
     /// The remote peer's node ID.
     pub node_id: NodeId,
+    /// The actual connection.
+    pub connection: iroh::endpoint::Connection,
     /// When the connection was established.
     pub established_at: Instant,
     /// The ALPN protocol used.
@@ -31,22 +33,22 @@ pub struct IrohPeerInfo {
 pub struct IrohStream {
     send: iroh::endpoint::SendStream,
     recv: iroh::endpoint::RecvStream,
-    peer_info: IrohPeerInfo,
+    context: IrohContext,
 }
 
 impl Unpin for IrohStream {}
 
 impl IrohStream {
-    /// Creates a new IrohStream from send/recv streams and peer info
+    /// Creates a new IrohStream from send/recv streams and context
     pub fn new(
         send: iroh::endpoint::SendStream,
         recv: iroh::endpoint::RecvStream,
-        peer_info: IrohPeerInfo,
+        context: IrohContext,
     ) -> Self {
         Self {
             send,
             recv,
-            peer_info,
+            context,
         }
     }
 }
@@ -99,9 +101,9 @@ impl AsyncWrite for IrohStream {
 }
 
 impl Connected for IrohStream {
-    type ConnectInfo = IrohPeerInfo;
+    type ConnectInfo = IrohContext;
 
     fn connect_info(&self) -> Self::ConnectInfo {
-        self.peer_info.clone()
+        self.context.clone()
     }
 }

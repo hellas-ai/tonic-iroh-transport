@@ -41,12 +41,13 @@ async fn test_iroh_connection() {
             // Test creating an IrohStream from the connection
             match conn.open_bi().await {
                 Ok((send, recv)) => {
-                    let peer_info = tonic_iroh_transport::stream::IrohPeerInfo {
+                    let context = tonic_iroh_transport::stream::IrohContext {
                         node_id: node_id2,
+                        connection: conn.clone(),
                         established_at: std::time::Instant::now(),
                         alpn: conn.alpn().unwrap_or_default(),
                     };
-                    let _stream = IrohStream::new(send, recv, peer_info);
+                    let _stream = IrohStream::new(send, recv, context);
                     println!("✅ Successfully created IrohStream!");
                 }
                 Err(e) => panic!("Failed to create IrohStream: {}", e),

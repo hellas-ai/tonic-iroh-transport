@@ -11,4 +11,4 @@ pub mod stream;
 pub use client::{connect_with_alpn, IrohChannel, IrohClient};
 pub use error::{Error, Result};
 pub use server::{service_to_alpn, GrpcProtocolHandler, IrohIncoming};
-pub use stream::{IrohPeerInfo, IrohStream};
+pub use stream::{IrohContext, IrohStream};

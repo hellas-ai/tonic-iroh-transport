@@ -123,15 +123,16 @@ impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
                     Ok((send, recv)) => {
                         debug!("Accepted new stream for service '{}'", service_name);
 
-                        // Create peer info for this stream
-                        let peer_info = crate::stream::IrohPeerInfo {
+                        // Create context for this stream
+                        let context = crate::stream::IrohContext {
                             node_id: remote_node_id,
+                            connection: connection.clone(),
                             established_at: std::time::Instant::now(),
                             alpn: connection.alpn().unwrap_or_default(),
                         };
 
                         // Create IrohStream for this gRPC call
-                        let stream = IrohStream::new(send, recv, peer_info);
+                        let stream = IrohStream::new(send, recv, context);
 
                         // Send to tonic's serve_with_incoming (don't wrap in TokioIo)
                         if let Err(e) = sender.send(Ok(stream)) {

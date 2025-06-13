@@ -88,14 +88,15 @@ pub async fn connect_with_alpn(
                     .await
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::BrokenPipe, e))?;
 
-                // Create the stream with peer info
-                let peer_info = crate::stream::IrohPeerInfo {
-                    node_id: connection.remote_node_id().map_err(std::io::Error::other)?,
+                // Create the stream with context
+                let context = crate::stream::IrohContext {
+                    node_id: target_id,
+                    connection: connection.clone(),
                     established_at: std::time::Instant::now(),
                     alpn,
                 };
 
-                let stream = IrohStream::new(send, recv, peer_info);
+                let stream = IrohStream::new(send, recv, context);
                 Ok::<_, std::io::Error>(TokioIo::new(stream))
             }
         }))

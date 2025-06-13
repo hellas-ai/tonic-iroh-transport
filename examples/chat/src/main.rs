@@ -6,9 +6,9 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
-use tonic::{Request, Response, Status, Streaming};
 use tonic::transport::Server;
-use tracing::{info, warn, error};
+use tonic::{Request, Response, Status, Streaming};
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 mod pb;
@@ -21,8 +21,8 @@ use pb::p2p_chat::{
     *,
 };
 
-use tonic_iroh_transport::{GrpcProtocolHandler, IrohChannel, IrohClient, IrohPeerInfo};
 use iroh::{NodeAddr, NodeId, SecretKey};
+use tonic_iroh_transport::{GrpcProtocolHandler, IrohChannel, IrohClient, IrohContext};
 
 #[derive(Parser)]
 #[clap(name = "p2p-chat")]
@@ -31,35 +31,35 @@ struct Args {
     /// Node secret key (hex encoded), generates random if not provided
     #[clap(long)]
     secret_key: Option<String>,
-    
+
     /// Custom relay URLs to use
     #[clap(long)]
     relay_url: Vec<String>,
-    
+
     /// Bind port for local connections (optional)
     #[clap(long, default_value = "0")]
     port: u16,
-    
+
     /// Enable verbose logging
     #[clap(short, long)]
     verbose: bool,
-    
+
     /// Disable relay servers (direct connections only)
     #[clap(long)]
     no_relay: bool,
-    
+
     /// Exit after processing this many messages (server mode)
     #[clap(long)]
     max_requests: Option<u64>,
-    
+
     /// Connect to another peer by Node ID
     #[clap(long)]
     connect_to: Option<String>,
-    
+
     /// Target node addresses for connection
     #[clap(long)]
     target_addresses: Vec<String>,
-    
+
     /// Command to execute after connecting
     #[clap(subcommand)]
     command: Option<Command>,
@@ -123,13 +123,19 @@ impl std::fmt::Debug for ChatState {
         f.debug_struct("ChatState")
             .field("node_id", &self.node_id)
             .field("messages", &"<RwLock<Vec<Message>>>")
-            .field("subscribers", &"<RwLock<HashMap<String, mpsc::Sender<Message>>>>")
+            .field(
+                "subscribers",
+                &"<RwLock<HashMap<String, mpsc::Sender<Message>>>>",
+            )
             .finish()
     }
 }
 
 impl ChatState {
-    fn new(node_id: String, max_requests: Option<u64>) -> (Self, tokio::sync::broadcast::Receiver<()>) {
+    fn new(
+        node_id: String,
+        max_requests: Option<u64>,
+    ) -> (Self, tokio::sync::broadcast::Receiver<()>) {
         let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
         let state = Self {
             messages: Arc::new(RwLock::new(Vec::new())),
@@ -144,7 +150,7 @@ impl ChatState {
 
     async fn add_message(&self, message: Message) {
         self.messages.write().await.push(message.clone());
-        
+
         let subscribers = self.subscribers.read().await;
         for (subscriber_id, sender) in subscribers.iter() {
             if sender.send(message.clone()).await.is_err() {
@@ -180,19 +186,22 @@ impl P2pChatService for ChatServiceImpl {
         request: Request<SendMessageRequest>,
     ) -> Result<Response<SendMessageResponse>, Status> {
         // Extract connection information from the request extensions
-        let connect_info = request.extensions().get::<IrohPeerInfo>().cloned();
-        
+        let connect_info = request.extensions().get::<IrohContext>().cloned();
+
         let req = request.into_inner();
-        
+
         // Log connection details if available
-        if let Some(peer_info) = connect_info {
+        if let Some(context) = connect_info {
             info!("=== Connection Info ===");
-            info!("Remote Node ID: {}", peer_info.node_id);
-            info!("Connection established: {:?} ago", peer_info.established_at.elapsed());
-            info!("ALPN protocol: {}", String::from_utf8_lossy(&peer_info.alpn));
+            info!("Remote Node ID: {}", context.node_id);
+            info!(
+                "Connection established: {:?} ago",
+                context.established_at.elapsed()
+            );
+            info!("ALPN protocol: {}", String::from_utf8_lossy(&context.alpn));
             info!("======================");
         }
-        
+
         let message = Message {
             id: uuid::new_v4().to_string(),
             sender_id: self.state.node_id.clone(),
@@ -202,12 +211,19 @@ impl P2pChatService for ChatServiceImpl {
             r#type: MessageType::Text as i32,
         };
 
-        info!("Received message from {}: {}", message.sender_id, message.content);
-        
+        info!(
+            "Received message from {}: {}",
+            message.sender_id, message.content
+        );
+
         self.state.add_message(message.clone()).await;
 
         // Increment request counter and check if we should exit
-        let count = self.state.request_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        let count = self
+            .state
+            .request_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
         if let Some(max) = self.state.max_requests {
             if count >= max {
                 println!("Processed {count} requests, triggering graceful shutdown");
@@ -229,23 +245,23 @@ impl P2pChatService for ChatServiceImpl {
         request: Request<SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeMessagesStream>, Status> {
         // Extract connection information for subscriber
-        let connect_info = request.extensions().get::<IrohPeerInfo>().cloned();
-        
-        if let Some(peer_info) = connect_info {
+        let connect_info = request.extensions().get::<IrohContext>().cloned();
+
+        if let Some(context) = connect_info {
             info!("=== New Subscriber ===");
-            info!("Subscriber Node ID: {}", peer_info.node_id);
-            info!("Connection age: {:?}", peer_info.established_at.elapsed());
-            info!("ALPN protocol: {}", String::from_utf8_lossy(&peer_info.alpn));
+            info!("Subscriber Node ID: {}", context.node_id);
+            info!("Connection age: {:?}", context.established_at.elapsed());
+            info!("ALPN protocol: {}", String::from_utf8_lossy(&context.alpn));
             info!("======================");
         }
-        
+
         let subscriber_id = uuid::new_v4().to_string();
         let subscriber_id_clone = subscriber_id.clone();
         let (tx, rx) = mpsc::channel(100);
-        
+
         let (result_tx, result_rx) = mpsc::channel(100);
         let state = self.state.clone();
-        
+
         tokio::spawn(async move {
             let mut message_rx = rx;
             while let Some(message) = message_rx.recv().await {
@@ -257,9 +273,9 @@ impl P2pChatService for ChatServiceImpl {
         });
 
         self.state.add_subscriber(subscriber_id, tx).await;
-        
+
         info!("New message subscriber connected");
-        
+
         Ok(Response::new(ReceiverStream::new(result_rx)))
     }
 
@@ -269,12 +285,12 @@ impl P2pChatService for ChatServiceImpl {
     ) -> Result<Response<GetHistoryResponse>, Status> {
         let req = request.into_inner();
         let messages = self.state.messages.read().await;
-        
+
         let filtered_messages: Vec<Message> = messages
             .iter()
             .filter(|msg| {
-                (msg.sender_id == req.peer_id || msg.recipient_id == req.peer_id) &&
-                (req.before_timestamp == 0 || msg.timestamp < req.before_timestamp)
+                (msg.sender_id == req.peer_id || msg.recipient_id == req.peer_id)
+                    && (req.before_timestamp == 0 || msg.timestamp < req.before_timestamp)
             })
             .take(req.limit as usize)
             .cloned()
@@ -303,9 +319,9 @@ impl P2pChatService for ChatServiceImpl {
                 match result {
                     Ok(message) => {
                         info!("Received chat stream message: {}", message.content);
-                        
+
                         state.add_message(message.clone()).await;
-                        
+
                         let response = Message {
                             id: uuid::new_v4().to_string(),
                             sender_id: state.node_id.clone(),
@@ -314,7 +330,7 @@ impl P2pChatService for ChatServiceImpl {
                             timestamp: chrono::Utc::now().timestamp(),
                             r#type: MessageType::Text as i32,
                         };
-                        
+
                         if tx.send(Ok(response)).await.is_err() {
                             break;
                         }
@@ -349,10 +365,7 @@ impl NodeServiceImpl {
 
 #[tonic::async_trait]
 impl NodeService for NodeServiceImpl {
-    async fn get_node_info(
-        &self,
-        _request: Request<Empty>,
-    ) -> Result<Response<NodeInfo>, Status> {
+    async fn get_node_info(&self, _request: Request<Empty>) -> Result<Response<NodeInfo>, Status> {
         Ok(Response::new(NodeInfo {
             node_id: self.state.node_id.clone(),
             addresses: vec![],
@@ -362,13 +375,10 @@ impl NodeService for NodeServiceImpl {
         }))
     }
 
-    async fn ping(
-        &self,
-        request: Request<PingRequest>,
-    ) -> Result<Response<PingResponse>, Status> {
+    async fn ping(&self, request: Request<PingRequest>) -> Result<Response<PingResponse>, Status> {
         let req = request.into_inner();
         let now = chrono::Utc::now().timestamp();
-        
+
         Ok(Response::new(PingResponse {
             request_timestamp: req.timestamp,
             response_timestamp: now,
@@ -380,15 +390,10 @@ impl NodeService for NodeServiceImpl {
         &self,
         _request: Request<Empty>,
     ) -> Result<Response<ListPeersResponse>, Status> {
-        Ok(Response::new(ListPeersResponse {
-            peers: vec![],
-        }))
+        Ok(Response::new(ListPeersResponse { peers: vec![] }))
     }
 
-    async fn shutdown(
-        &self,
-        _request: Request<Empty>,
-    ) -> Result<Response<Empty>, Status> {
+    async fn shutdown(&self, _request: Request<Empty>) -> Result<Response<Empty>, Status> {
         println!("Shutdown requested via RPC, triggering graceful shutdown");
         let _ = self.state.shutdown_tx.send(());
         Ok(Response::new(Empty {}))
@@ -407,38 +412,38 @@ async fn main() -> Result<()> {
             .add_directive("debug".parse().unwrap())
     } else {
         // Use RUST_LOG if set, otherwise default to INFO
-        EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new("info"))
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))
     };
-    
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .init();
+
+    tracing_subscriber::fmt().with_env_filter(env_filter).init();
 
     info!("Starting P2P Chat Node");
 
     let mut endpoint_builder = iroh::Endpoint::builder();
-    
+
     if let Some(secret_key) = args.secret_key {
         let secret_key = SecretKey::from_str(&secret_key)?;
         endpoint_builder = endpoint_builder.secret_key(secret_key);
     }
-    
+
     if args.port > 0 {
-        endpoint_builder = endpoint_builder.bind_addr_v4(std::net::SocketAddrV4::new(std::net::Ipv4Addr::UNSPECIFIED, args.port));
+        endpoint_builder = endpoint_builder.bind_addr_v4(std::net::SocketAddrV4::new(
+            std::net::Ipv4Addr::UNSPECIFIED,
+            args.port,
+        ));
     }
-    
+
     if args.no_relay {
         info!("Relay servers disabled - using direct connections only");
         // Disable all relay URLs for direct-only mode
         endpoint_builder = endpoint_builder.relay_mode(iroh::RelayMode::Disabled);
     }
-    
+
     let endpoint = endpoint_builder.bind().await?;
     let node_id = endpoint.node_id().to_string();
-    
+
     println!("Node ID: {node_id}");
-    
+
     let local_addrs = endpoint.bound_sockets();
     if let Some(socket_addr) = local_addrs.first() {
         let node_addr = NodeAddr::new(endpoint.node_id()).with_direct_addresses([*socket_addr]);
@@ -449,11 +454,13 @@ async fn main() -> Result<()> {
     let chat_service = ChatServiceImpl::new(chat_state.clone());
     let node_service = NodeServiceImpl::new(chat_state);
 
-    let (chat_handler, chat_incoming, chat_alpn) = GrpcProtocolHandler::for_service::<P2pChatServiceServer<ChatServiceImpl>>();
-    let (node_handler, node_incoming, node_alpn) = GrpcProtocolHandler::for_service::<NodeServiceServer<NodeServiceImpl>>();
+    let (chat_handler, chat_incoming, chat_alpn) =
+        GrpcProtocolHandler::for_service::<P2pChatServiceServer<ChatServiceImpl>>();
+    let (node_handler, node_incoming, node_alpn) =
+        GrpcProtocolHandler::for_service::<NodeServiceServer<NodeServiceImpl>>();
 
     let endpoint_for_client = endpoint.clone();
-    
+
     // Log the protocols before moving
     println!("P2P Chat Node started successfully");
     info!("Available protocols:");
@@ -469,7 +476,7 @@ async fn main() -> Result<()> {
     let chat_server = Server::builder()
         .add_service(P2pChatServiceServer::new(chat_service))
         .serve_with_incoming(chat_incoming);
-        
+
     // Spawn node server
     let node_server = Server::builder()
         .add_service(NodeServiceServer::new(node_service))
@@ -479,9 +486,16 @@ async fn main() -> Result<()> {
         let endpoint_clone = endpoint_for_client.clone();
         let target_addresses = args.target_addresses.clone();
         let command = args.command;
-        
+
         tokio::spawn(async move {
-            if let Err(e) = connect_and_execute_command(endpoint_clone, target_node_id, target_addresses, command).await {
+            if let Err(e) = connect_and_execute_command(
+                endpoint_clone,
+                target_node_id,
+                target_addresses,
+                command,
+            )
+            .await
+            {
                 error!("Failed to connect and execute command: {}", e);
             }
         });
@@ -507,7 +521,7 @@ async fn main() -> Result<()> {
     }
 
     router.shutdown().await?;
-    
+
     Ok(())
 }
 
@@ -531,11 +545,15 @@ async fn connect_and_execute_command(
     info!("Connecting to: {:?}", target_addr);
 
     let local_node_id = endpoint.node_id().to_string();
-    
+
     // Create typed clients using IrohClient
     let iroh_client = IrohClient::new(endpoint);
-    let chat_channel = iroh_client.connect_to_service::<P2pChatServiceServer<ChatServiceImpl>>(target_addr.clone()).await?;
-    let node_channel = iroh_client.connect_to_service::<NodeServiceServer<NodeServiceImpl>>(target_addr).await?;
+    let chat_channel = iroh_client
+        .connect_to_service::<P2pChatServiceServer<ChatServiceImpl>>(target_addr.clone())
+        .await?;
+    let node_channel = iroh_client
+        .connect_to_service::<NodeServiceServer<NodeServiceImpl>>(target_addr)
+        .await?;
     let mut chat_client = P2pChatServiceClient::new(chat_channel);
     let mut node_client = NodeServiceClient::new(node_channel);
 
@@ -568,8 +586,19 @@ async fn connect_and_execute_command(
             list_peers(&mut node_client).await?;
             std::process::exit(0);
         }
-        Some(Command::Benchmark { duration, message, concurrent }) => {
-            benchmark_messages(&mut chat_client, &target_node_id.to_string(), message, duration, concurrent).await?;
+        Some(Command::Benchmark {
+            duration,
+            message,
+            concurrent,
+        }) => {
+            benchmark_messages(
+                &mut chat_client,
+                &target_node_id.to_string(),
+                message,
+                duration,
+                concurrent,
+            )
+            .await?;
             std::process::exit(0);
         }
         Some(Command::Shutdown) => {
@@ -590,7 +619,7 @@ async fn send_message(
     content: String,
 ) -> Result<()> {
     info!("Sending message: {}", content);
-    
+
     let request = Request::new(SendMessageRequest {
         recipient_id: recipient_id.to_string(),
         content,
@@ -609,16 +638,14 @@ async fn send_message(
     Ok(())
 }
 
-async fn subscribe_messages(
-    client: &mut P2pChatServiceClient<IrohChannel>,
-) -> Result<()> {
+async fn subscribe_messages(client: &mut P2pChatServiceClient<IrohChannel>) -> Result<()> {
     info!("Subscribing to messages...");
-    
+
     let request = Request::new(SubscribeRequest {});
     let mut stream = client.subscribe_messages(request).await?.into_inner();
 
     info!("Connected to message stream. Waiting for messages...");
-    
+
     while let Some(message_result) = stream.next().await {
         match message_result {
             Ok(message) => {
@@ -645,7 +672,7 @@ async fn get_history(
     limit: i32,
 ) -> Result<()> {
     info!("Getting chat history...");
-    
+
     let request = Request::new(GetHistoryRequest {
         peer_id: peer_id.to_string(),
         limit,
@@ -656,7 +683,7 @@ async fn get_history(
     let response = response.into_inner();
 
     info!("Retrieved {} messages:", response.messages.len());
-    
+
     for message in response.messages {
         info!(
             "[{}] {} -> {}: {}",
@@ -679,10 +706,10 @@ async fn interactive_chat(
     local_node_id: &str,
 ) -> Result<()> {
     info!("Starting interactive chat session. Type 'quit' to exit.");
-    
+
     let (tx, rx) = tokio::sync::mpsc::channel(100);
     let rx_stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-    
+
     let request = Request::new(rx_stream);
     let mut response_stream = client.chat_stream(request).await?.into_inner();
 
@@ -702,21 +729,21 @@ async fn interactive_chat(
 
     let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
     let mut line = String::new();
-    
+
     loop {
         line.clear();
         use tokio::io::AsyncBufReadExt;
-        
+
         print!("> ");
         if stdin.read_line(&mut line).await? == 0 {
             break;
         }
-        
+
         let content = line.trim().to_string();
         if content == "quit" {
             break;
         }
-        
+
         if !content.is_empty() {
             let message = Message {
                 id: uuid::new_v4().to_string(),
@@ -726,7 +753,7 @@ async fn interactive_chat(
                 timestamp: chrono::Utc::now().timestamp(),
                 r#type: MessageType::Text as i32,
             };
-            
+
             if tx.send(message).await.is_err() {
                 error!("Failed to send message");
                 break;
@@ -736,7 +763,7 @@ async fn interactive_chat(
 
     drop(tx);
     response_handle.abort();
-    
+
     Ok(())
 }
 
@@ -746,9 +773,9 @@ async fn ping_node(
 ) -> Result<()> {
     let now = chrono::Utc::now().timestamp();
     let data = data.unwrap_or_else(|| "ping".to_string());
-    
+
     info!("Pinging node with data: {}", data);
-    
+
     let request = Request::new(PingRequest {
         timestamp: now,
         data: data.clone(),
@@ -758,21 +785,18 @@ async fn ping_node(
     let response = response.into_inner();
 
     let rtt = response.response_timestamp - response.request_timestamp;
-    
+
     info!(
         "Pong received! RTT: {}ms, Echo: {}",
-        rtt,
-        response.echo_data
+        rtt, response.echo_data
     );
 
     Ok(())
 }
 
-async fn get_node_info(
-    client: &mut NodeServiceClient<IrohChannel>,
-) -> Result<()> {
+async fn get_node_info(client: &mut NodeServiceClient<IrohChannel>) -> Result<()> {
     info!("Getting node information...");
-    
+
     let request = Request::new(Empty {});
     let response = client.get_node_info(request).await?;
     let response = response.into_inner();
@@ -790,11 +814,9 @@ async fn get_node_info(
     Ok(())
 }
 
-async fn list_peers(
-    client: &mut NodeServiceClient<IrohChannel>,
-) -> Result<()> {
+async fn list_peers(client: &mut NodeServiceClient<IrohChannel>) -> Result<()> {
     info!("Listing connected peers...");
-    
+
     let request = Request::new(Empty {});
     let response = client.list_peers(request).await?;
     let response = response.into_inner();
@@ -806,7 +828,7 @@ async fn list_peers(
             Ok(ConnectionType::Relay) => "Relay",
             _ => "Unknown",
         };
-        
+
         info!("  {}", peer.node_id);
         info!("    Connection: {}", connection_type);
         info!("    Since: {}", format_timestamp(peer.connected_since));
@@ -818,14 +840,12 @@ async fn list_peers(
     Ok(())
 }
 
-async fn shutdown_node(
-    client: &mut NodeServiceClient<IrohChannel>,
-) -> Result<()> {
+async fn shutdown_node(client: &mut NodeServiceClient<IrohChannel>) -> Result<()> {
     println!("Requesting graceful shutdown of target node...");
-    
+
     let request = Request::new(Empty {});
     let _response = client.shutdown(request).await?;
-    
+
     println!("Shutdown request sent successfully");
     Ok(())
 }
@@ -837,14 +857,16 @@ async fn benchmark_messages(
     duration_secs: u64,
     max_concurrent: usize,
 ) -> Result<()> {
-    println!("Starting benchmark: {duration_secs} seconds, max {max_concurrent} concurrent messages");
-    
+    println!(
+        "Starting benchmark: {duration_secs} seconds, max {max_concurrent} concurrent messages"
+    );
+
     let start_time = std::time::Instant::now();
     let duration = std::time::Duration::from_secs(duration_secs);
     let mut message_count = 0u64;
     let mut error_count = 0u64;
     let mut tasks = tokio::task::JoinSet::new();
-    
+
     while start_time.elapsed() < duration {
         // Keep max_concurrent tasks running
         while tasks.len() < max_concurrent && start_time.elapsed() < duration {
@@ -852,18 +874,18 @@ async fn benchmark_messages(
             let recipient_id = recipient_id.to_string();
             let content = format!("{message_content} #{message_count}");
             message_count += 1;
-            
+
             tasks.spawn(async move {
                 let request = Request::new(SendMessageRequest {
                     recipient_id,
                     content,
                     timestamp: chrono::Utc::now().timestamp(),
                 });
-                
+
                 client_clone.send_message(request).await
             });
         }
-        
+
         // Wait for at least one task to complete
         if let Some(result) = tasks.join_next().await {
             match result {
@@ -891,7 +913,7 @@ async fn benchmark_messages(
             }
         }
     }
-    
+
     // Wait for remaining tasks to complete
     while let Some(result) = tasks.join_next().await {
         match result {
@@ -906,29 +928,32 @@ async fn benchmark_messages(
             }
         }
     }
-    
+
     let elapsed = start_time.elapsed();
     let messages_per_sec = message_count as f64 / elapsed.as_secs_f64();
     let success_count = message_count - error_count;
     let success_rate = (success_count as f64 / message_count as f64) * 100.0;
-    
+
     println!("=== Benchmark Results ===");
     println!("Duration: {:.2}s", elapsed.as_secs_f64());
     println!("Total messages: {message_count}");
     println!("Successful: {success_count} ({success_rate:.1}%)");
     println!("Errors: {error_count}");
     println!("Messages/sec: {messages_per_sec:.2}");
-    println!("Avg latency: {:.2}ms", elapsed.as_millis() as f64 / message_count as f64);
-    
+    println!(
+        "Avg latency: {:.2}ms",
+        elapsed.as_millis() as f64 / message_count as f64
+    );
+
     Ok(())
 }
 
 fn format_timestamp(timestamp: i64) -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    
+
     let duration = std::time::Duration::from_secs(timestamp as u64);
     let datetime = UNIX_EPOCH + duration;
-    
+
     match datetime.duration_since(SystemTime::now()) {
         Ok(_) => format!("future+{timestamp}s"),
         Err(e) => format!("{}s ago", e.duration().as_secs()),
@@ -943,18 +968,19 @@ mod uuid {
 
 mod chrono {
     pub struct Utc;
-    
+
     impl Utc {
         pub fn now() -> DateTime {
             DateTime(std::time::SystemTime::now())
         }
     }
-    
+
     pub struct DateTime(std::time::SystemTime);
-    
+
     impl DateTime {
         pub fn timestamp(&self) -> i64 {
-            self.0.duration_since(std::time::UNIX_EPOCH)
+            self.0
+                .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs() as i64
         }
@@ -965,7 +991,7 @@ mod rand {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     use std::time::SystemTime;
-    
+
     pub fn random<T: From<u128>>() -> T {
         let mut hasher = DefaultHasher::new();
         SystemTime::now().hash(&mut hasher);

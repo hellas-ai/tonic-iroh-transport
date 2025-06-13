@@ -1,7 +1,7 @@
-.PHONY: all build check lint test examples clean install-tools help
+.PHONY: all build check lint test examples clean install-tools help fmt fmt-examples fmt-all fmt-check fmt-check-examples fmt-check-all
 
 # Default target
-all: check-all lint-all test-all doc-check-all build examples
+all: fmt-all check-all lint-all test-all doc-check-all build examples
 
 # Build the main crate
 build:
@@ -23,10 +23,30 @@ fmt:
 	@echo "Formatting code..."
 	cargo fmt
 
+# Format examples
+fmt-examples:
+	@echo "Formatting chat example..."
+	cd examples/chat && cargo fmt
+	@echo "Formatting echo example..."
+	cd examples/echo && cargo fmt
+
+# Format all code including examples
+fmt-all: fmt fmt-examples
+
 # Check if code is formatted
 fmt-check:
 	@echo "Checking code formatting..."
 	cargo fmt --check
+
+# Check if examples are formatted
+fmt-check-examples:
+	@echo "Checking chat example formatting..."
+	cd examples/chat && cargo fmt --check
+	@echo "Checking echo example formatting..."
+	cd examples/echo && cargo fmt --check
+
+# Check all code formatting including examples
+fmt-check-all: fmt-check fmt-check-examples
 
 # Lint with clippy
 lint:
@@ -137,22 +157,26 @@ install-tools:
 	rustup component add rustfmt clippy
 
 # Run comprehensive checks
-ci: fmt-check lint-all test-all doc-check-all build examples
+ci: fmt-check-all lint-all test-all doc-check-all build examples
 
 # Development workflow
-dev: fmt check lint test
+dev: fmt-all check lint test
 
 # Show help
 help:
 	@echo "Available targets:"
-	@echo "  all              - Run check, lint, test, build, and examples"
+	@echo "  all              - Run format, check, lint, test, build, and examples"
 	@echo "  build            - Build the main crate"
 	@echo "  build-release    - Build the main crate in release mode"
 	@echo "  check            - Check code without building"
 	@echo "  check-all        - Check main crate and examples"
 	@echo "  check-examples   - Check examples only"
-	@echo "  fmt              - Format code"
-	@echo "  fmt-check        - Check if code is formatted"
+	@echo "  fmt              - Format main crate code"
+	@echo "  fmt-examples     - Format examples code"
+	@echo "  fmt-all          - Format main crate and examples"
+	@echo "  fmt-check        - Check if main crate code is formatted"
+	@echo "  fmt-check-examples - Check if examples code is formatted"
+	@echo "  fmt-check-all    - Check if all code is formatted"
 	@echo "  lint             - Lint main crate with clippy"
 	@echo "  lint-all         - Lint main crate and examples"
 	@echo "  lint-examples    - Lint examples only"
