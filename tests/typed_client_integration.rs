@@ -8,22 +8,27 @@ use tracing::info;
 /// Test multiple connections using our typed client
 #[test_log::test(tokio::test)]
 async fn test_typed_client_multiple_connections() {
-
     // Create server endpoint
     let server_endpoint = iroh::Endpoint::builder().bind().await.unwrap();
     let server_node_id = server_endpoint.node_id();
-    
+
     info!("Server Node ID: {}", server_node_id);
 
     // Set up multiple mock services using the same handler pattern
-    let (service1_handler, service1_incoming, service1_alpn) = 
+    let (service1_handler, _service1_incoming, service1_alpn) =
         GrpcProtocolHandler::for_service::<MockService1Server<MockService1>>();
-    let (service2_handler, service2_incoming, service2_alpn) = 
+    let (service2_handler, _service2_incoming, service2_alpn) =
         GrpcProtocolHandler::for_service::<MockService2Server<MockService2>>();
-    
-    info!("Service1 protocol: {}", String::from_utf8_lossy(&service1_alpn));
-    info!("Service2 protocol: {}", String::from_utf8_lossy(&service2_alpn));
-    
+
+    info!(
+        "Service1 protocol: {}",
+        String::from_utf8_lossy(&service1_alpn)
+    );
+    info!(
+        "Service2 protocol: {}",
+        String::from_utf8_lossy(&service2_alpn)
+    );
+
     let _router = iroh::protocol::Router::builder(server_endpoint.clone())
         .accept(service1_alpn, service1_handler)
         .accept(service2_alpn, service2_handler)
@@ -36,9 +41,9 @@ async fn test_typed_client_multiple_connections() {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     });
-    
+
     let _service2_server = tokio::spawn(async move {
-        // Mock server that just handles connections without actual tonic service  
+        // Mock server that just handles connections without actual tonic service
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
@@ -50,47 +55,55 @@ async fn test_typed_client_multiple_connections() {
     // Create client endpoints
     let client1_endpoint = iroh::Endpoint::builder().bind().await.unwrap();
     let client2_endpoint = iroh::Endpoint::builder().bind().await.unwrap();
-    
+
     info!("Client1 Node ID: {}", client1_endpoint.node_id());
     info!("Client2 Node ID: {}", client2_endpoint.node_id());
 
     let server_addr = if let Some(socket_addr) = server_endpoint.bound_sockets().first() {
-        iroh_base::NodeAddr::new(server_node_id).with_direct_addresses([*socket_addr])
+        iroh::NodeAddr::new(server_node_id).with_direct_addresses([*socket_addr])
     } else {
-        iroh_base::NodeAddr::new(server_node_id)
+        iroh::NodeAddr::new(server_node_id)
     };
-    
+
     // Test our typed client connections
     let iroh_client1 = IrohClient::new(client1_endpoint);
     let iroh_client2 = IrohClient::new(client2_endpoint);
-    
+
     // Test connecting to different services with type safety
     let service1_result = timeout(
         Duration::from_secs(5),
-        iroh_client1.connect_to_service::<MockService1Server<MockService1>>(server_addr.clone())
-    ).await;
-    
+        iroh_client1.connect_to_service::<MockService1Server<MockService1>>(server_addr.clone()),
+    )
+    .await;
+
     let service2_result = timeout(
-        Duration::from_secs(5), 
-        iroh_client2.connect_to_service::<MockService2Server<MockService2>>(server_addr.clone())
-    ).await;
-    
+        Duration::from_secs(5),
+        iroh_client2.connect_to_service::<MockService2Server<MockService2>>(server_addr.clone()),
+    )
+    .await;
+
     // Test that both connections succeed
     match (service1_result, service2_result) {
         (Ok(Ok(channel1)), Ok(Ok(channel2))) => {
             info!("✅ Successfully created both channels");
-            
+
             // Verify we can create clients from the channels
             let _client1 = MockService1Client::new(channel1);
             let _client2 = MockService2Client::new(channel2);
-            
+
             info!("✅ Successfully created typed clients");
         }
         (Ok(Err(e1)), _) => {
-            info!("⚠️  Service1 connection failed (expected in some environments): {}", e1);
+            info!(
+                "⚠️  Service1 connection failed (expected in some environments): {}",
+                e1
+            );
         }
         (_, Ok(Err(e2))) => {
-            info!("⚠️  Service2 connection failed (expected in some environments): {}", e2);
+            info!(
+                "⚠️  Service2 connection failed (expected in some environments): {}",
+                e2
+            );
         }
         (Err(_), _) => {
             info!("⚠️  Service1 connection timed out (expected in some environments)");
@@ -99,43 +112,50 @@ async fn test_typed_client_multiple_connections() {
             info!("⚠️  Service2 connection timed out (expected in some environments)");
         }
     }
-    
-    // Test same client connecting to multiple services  
+
+    // Test same client connecting to multiple services
     let multi_service_test = async {
-        let service1_channel = iroh_client1.connect_to_service::<MockService1Server<MockService1>>(server_addr.clone()).await?;
-        let service2_channel = iroh_client1.connect_to_service::<MockService2Server<MockService2>>(server_addr).await?;
-        
+        let service1_channel = iroh_client1
+            .connect_to_service::<MockService1Server<MockService1>>(server_addr.clone())
+            .await?;
+        let service2_channel = iroh_client1
+            .connect_to_service::<MockService2Server<MockService2>>(server_addr)
+            .await?;
+
         let _client1 = MockService1Client::new(service1_channel);
         let _client2 = MockService2Client::new(service2_channel);
-        
+
         Ok::<(), tonic_iroh_transport::Error>(())
     };
-    
+
     match timeout(Duration::from_secs(5), multi_service_test).await {
         Ok(Ok(())) => {
             info!("✅ Same client connected to multiple services successfully");
         }
         Ok(Err(e)) => {
-            info!("⚠️  Multi-service connection failed (expected in some environments): {}", e);
+            info!(
+                "⚠️  Multi-service connection failed (expected in some environments): {}",
+                e
+            );
         }
         Err(_) => {
             info!("⚠️  Multi-service connection timed out (expected in some environments)");
         }
     }
-    
+
     info!("✅ Typed client integration test completed!");
 }
 
 /// Test concurrent connections to demonstrate scalability
 #[test_log::test(tokio::test)]
 async fn test_concurrent_typed_clients() {
-
     // Create server endpoint
     let server_endpoint = iroh::Endpoint::builder().bind().await.unwrap();
     let server_node_id = server_endpoint.node_id();
-    
-    let (handler, _incoming, alpn) = GrpcProtocolHandler::for_service::<MockService1Server<MockService1>>();
-    
+
+    let (handler, _incoming, alpn) =
+        GrpcProtocolHandler::for_service::<MockService1Server<MockService1>>();
+
     let _router = iroh::protocol::Router::builder(server_endpoint.clone())
         .accept(alpn, handler)
         .spawn();
@@ -143,38 +163,39 @@ async fn test_concurrent_typed_clients() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let server_addr = if let Some(socket_addr) = server_endpoint.bound_sockets().first() {
-        iroh_base::NodeAddr::new(server_node_id).with_direct_addresses([*socket_addr])
+        iroh::NodeAddr::new(server_node_id).with_direct_addresses([*socket_addr])
     } else {
-        iroh_base::NodeAddr::new(server_node_id)
+        iroh::NodeAddr::new(server_node_id)
     };
-    
+
     // Create multiple clients concurrently
     let num_clients = 3;
     let mut tasks = Vec::new();
-    
+
     for i in 0..num_clients {
         let server_addr = server_addr.clone();
         let task = tokio::spawn(async move {
             let client_endpoint = iroh::Endpoint::builder().bind().await.unwrap();
             let iroh_client = IrohClient::new(client_endpoint);
-            
+
             // Test typed connection
             let result = timeout(
                 Duration::from_secs(5),
-                iroh_client.connect_to_service::<MockService1Server<MockService1>>(server_addr)
-            ).await;
-            
+                iroh_client.connect_to_service::<MockService1Server<MockService1>>(server_addr),
+            )
+            .await;
+
             (i, result)
         });
-        
+
         tasks.push(task);
     }
-    
+
     // Wait for all clients to complete
     let results = futures_util::future::join_all(tasks).await;
-    
+
     let mut successful_connections = 0;
-    
+
     // Verify results
     for result in results {
         let (client_id, connection_result) = result.unwrap();
@@ -184,15 +205,24 @@ async fn test_concurrent_typed_clients() {
                 successful_connections += 1;
             }
             Ok(Err(e)) => {
-                info!("⚠️  Client {} connection failed (may be expected): {}", client_id, e);
+                info!(
+                    "⚠️  Client {} connection failed (may be expected): {}",
+                    client_id, e
+                );
             }
             Err(_) => {
-                info!("⚠️  Client {} connection timed out (may be expected)", client_id);
+                info!(
+                    "⚠️  Client {} connection timed out (may be expected)",
+                    client_id
+                );
             }
         }
     }
-    
-    info!("Concurrent connection test: {}/{} connections successful", successful_connections, num_clients);
+
+    info!(
+        "Concurrent connection test: {}/{} connections successful",
+        successful_connections, num_clients
+    );
     info!("✅ Concurrent typed clients test completed!");
 }
 

@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Tell cargo to rerun if any proto files change
     for proto_file in &proto_files {
-        println!("cargo:rerun-if-changed=proto/{}", proto_file);
+        println!("cargo:rerun-if-changed=proto/{proto_file}");
     }
     
     Ok(())

@@ -34,14 +34,7 @@
           RUST_LOG = "info";
 
           shellHook = ''
-            # Find git repository root and set GATE_STATE_DIR
-            REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
-            export GATE_STATE_DIR="$REPO_ROOT/.state"
-
-            echo "Gate development environment"
-            echo "Rust version: $(rustc --version)"
             echo "RUST_LOG set to: $RUST_LOG"
-            echo "GATE_STATE_DIR set to: $GATE_STATE_DIR"
           '';
         };
       });

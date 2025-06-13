@@ -1,15 +1,15 @@
 //! Simple client connector for tonic over iroh.
 
-use crate::{stream::IrohStream, server::service_to_alpn, Result};
+use crate::{server::service_to_alpn, stream::IrohStream, Result};
 use http::Uri;
 use hyper_util::rt::TokioIo;
+use iroh::NodeAddr;
 use tonic::transport::{Channel, Endpoint};
 use tower::service_fn;
 use tracing::{debug, info};
-use iroh::NodeAddr;
 
 /// A typed client wrapper for connecting to gRPC services over iroh.
-/// 
+///
 /// This provides a convenient way to connect to generated protobuf clients
 /// without manually handling ALPN protocols and connections.
 pub struct IrohClient {
@@ -23,18 +23,18 @@ impl IrohClient {
     }
 
     /// Connect to a specific gRPC service on a remote peer.
-    /// 
+    ///
     /// This automatically generates the correct ALPN protocol from the service type
     /// and returns a Channel that can be used to create a typed client.
-    /// 
+    ///
     /// # Example
     /// ```rust,no_run
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # use tonic_iroh_transport::IrohClient;
-    /// # use iroh_base::NodeAddr;
+    /// # use iroh::NodeAddr;
     /// # let endpoint = iroh::Endpoint::builder().bind().await?;
     /// # let target_addr = NodeAddr::new(endpoint.node_id());
-    /// 
+    ///
     /// let iroh_client = IrohClient::new(endpoint);
     /// // let channel = iroh_client.connect_to_service::<SomeServer<_>>(target_addr).await?;
     /// // let client = SomeClient::new(channel);
@@ -49,7 +49,6 @@ impl IrohClient {
         connect_with_alpn(self.endpoint.clone(), target, &alpn).await
     }
 
-
     /// Get a reference to the underlying iroh endpoint.
     pub fn endpoint(&self) -> &iroh::Endpoint {
         &self.endpoint
@@ -57,44 +56,51 @@ impl IrohClient {
 }
 
 /// Connect to a remote iroh peer with a specific ALPN protocol.
-pub async fn connect_with_alpn(endpoint: iroh::Endpoint, target: NodeAddr, alpn: &[u8]) -> Result<Channel> {
+pub async fn connect_with_alpn(
+    endpoint: iroh::Endpoint,
+    target: NodeAddr,
+    alpn: &[u8],
+) -> Result<Channel> {
     debug!("Connecting to peer: {}", target.node_id);
-    
+
     let target_id = target.node_id;
     let alpn_vec = alpn.to_vec();
-    
+
     // Create a dummy endpoint URI (not used by connector)
     let channel = Endpoint::try_from("http://[::]:50051")?
         .connect_with_connector(service_fn(move |_: Uri| {
             let endpoint = endpoint.clone();
             let target = target.clone();
             let alpn = alpn_vec.clone();
-            
+
             async move {
                 info!("Establishing iroh connection to {}", target.node_id);
-                
+
                 // Connect to the peer using iroh
-                let connection = endpoint.connect(target, &alpn).await
+                let connection = endpoint
+                    .connect(target, &alpn)
+                    .await
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e))?;
-                
+
                 // Open a bidirectional stream for this gRPC call
-                let (send, recv) = connection.open_bi().await
+                let (send, recv) = connection
+                    .open_bi()
+                    .await
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::BrokenPipe, e))?;
-                
+
                 // Create the stream with peer info
                 let peer_info = crate::stream::IrohPeerInfo {
-                    node_id: connection.remote_node_id()
-                        .map_err(std::io::Error::other)?,
+                    node_id: connection.remote_node_id().map_err(std::io::Error::other)?,
                     established_at: std::time::Instant::now(),
                     alpn,
                 };
-                
+
                 let stream = IrohStream::new(send, recv, peer_info);
                 Ok::<_, std::io::Error>(TokioIo::new(stream))
             }
         }))
         .await?;
-    
+
     info!("Successfully connected to peer: {}", target_id);
     Ok(channel)
 }

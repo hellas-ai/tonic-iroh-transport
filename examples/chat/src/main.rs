@@ -9,6 +9,7 @@ use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status, Streaming};
 use tonic::transport::Server;
 use tracing::{info, warn, error};
+use tracing_subscriber::EnvFilter;
 
 mod pb;
 
@@ -46,6 +47,10 @@ struct Args {
     /// Disable relay servers (direct connections only)
     #[clap(long)]
     no_relay: bool,
+    
+    /// Exit after processing this many messages (server mode)
+    #[clap(long)]
+    max_requests: Option<u64>,
     
     /// Connect to another peer by Node ID
     #[clap(long)]
@@ -99,6 +104,8 @@ enum Command {
         #[clap(long, default_value = "10")]
         concurrent: usize,
     },
+    /// Shutdown the target node gracefully
+    Shutdown,
 }
 
 #[derive(Clone)]
@@ -106,6 +113,9 @@ struct ChatState {
     messages: Arc<RwLock<Vec<Message>>>,
     subscribers: Arc<RwLock<HashMap<String, mpsc::Sender<Message>>>>,
     node_id: String,
+    request_count: Arc<std::sync::atomic::AtomicU64>,
+    max_requests: Option<u64>,
+    shutdown_tx: Arc<tokio::sync::broadcast::Sender<()>>,
 }
 
 impl std::fmt::Debug for ChatState {
@@ -119,12 +129,17 @@ impl std::fmt::Debug for ChatState {
 }
 
 impl ChatState {
-    fn new(node_id: String) -> Self {
-        Self {
+    fn new(node_id: String, max_requests: Option<u64>) -> (Self, tokio::sync::broadcast::Receiver<()>) {
+        let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
+        let state = Self {
             messages: Arc::new(RwLock::new(Vec::new())),
             subscribers: Arc::new(RwLock::new(HashMap::new())),
             node_id,
-        }
+            request_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            max_requests,
+            shutdown_tx: Arc::new(shutdown_tx),
+        };
+        (state, shutdown_rx)
     }
 
     async fn add_message(&self, message: Message) {
@@ -132,7 +147,7 @@ impl ChatState {
         
         let subscribers = self.subscribers.read().await;
         for (subscriber_id, sender) in subscribers.iter() {
-            if let Err(_) = sender.send(message.clone()).await {
+            if sender.send(message.clone()).await.is_err() {
                 warn!("Failed to send message to subscriber: {}", subscriber_id);
             }
         }
@@ -190,6 +205,15 @@ impl P2pChatService for ChatServiceImpl {
         info!("Received message from {}: {}", message.sender_id, message.content);
         
         self.state.add_message(message.clone()).await;
+
+        // Increment request counter and check if we should exit
+        let count = self.state.request_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        if let Some(max) = self.state.max_requests {
+            if count >= max {
+                println!("Processed {} requests, triggering graceful shutdown", count);
+                let _ = self.state.shutdown_tx.send(());
+            }
+        }
 
         Ok(Response::new(SendMessageResponse {
             success: true,
@@ -360,14 +384,35 @@ impl NodeService for NodeServiceImpl {
             peers: vec![],
         }))
     }
+
+    async fn shutdown(
+        &self,
+        _request: Request<Empty>,
+    ) -> Result<Response<Empty>, Status> {
+        println!("Shutdown requested via RPC, triggering graceful shutdown");
+        let _ = self.state.shutdown_tx.send(());
+        Ok(Response::new(Empty {}))
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
+    // Initialize tracing with environment variable support
+    let env_filter = if args.verbose {
+        // If verbose flag is set, override to DEBUG level
+        EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| EnvFilter::new("debug"))
+            .add_directive("debug".parse().unwrap())
+    } else {
+        // Use RUST_LOG if set, otherwise default to INFO
+        EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| EnvFilter::new("info"))
+    };
+    
     tracing_subscriber::fmt()
-        .with_max_level(if args.verbose { tracing::Level::DEBUG } else { tracing::Level::INFO })
+        .with_env_filter(env_filter)
         .init();
 
     info!("Starting P2P Chat Node");
@@ -392,7 +437,7 @@ async fn main() -> Result<()> {
     let endpoint = endpoint_builder.bind().await?;
     let node_id = endpoint.node_id().to_string();
     
-    info!("Node ID: {}", node_id);
+    println!("Node ID: {}", node_id);
     
     let local_addrs = endpoint.bound_sockets();
     if let Some(socket_addr) = local_addrs.first() {
@@ -400,7 +445,7 @@ async fn main() -> Result<()> {
         info!("Node Address: {:?}", node_addr);
     }
 
-    let chat_state = ChatState::new(node_id.clone());
+    let (chat_state, mut shutdown_rx) = ChatState::new(node_id.clone(), args.max_requests);
     let chat_service = ChatServiceImpl::new(chat_state.clone());
     let node_service = NodeServiceImpl::new(chat_state);
 
@@ -410,7 +455,7 @@ async fn main() -> Result<()> {
     let endpoint_for_client = endpoint.clone();
     
     // Log the protocols before moving
-    info!("P2P Chat Node started successfully");
+    println!("P2P Chat Node started successfully");
     info!("Available protocols:");
     info!("  - Chat Service: {}", String::from_utf8_lossy(&chat_alpn));
     info!("  - Node Service: {}", String::from_utf8_lossy(&node_alpn));
@@ -455,6 +500,9 @@ async fn main() -> Result<()> {
         }
         _ = tokio::signal::ctrl_c() => {
             info!("Shutting down node...");
+        }
+        _ = shutdown_rx.recv() => {
+            info!("Graceful shutdown triggered by max requests");
         }
     }
 
@@ -522,6 +570,10 @@ async fn connect_and_execute_command(
         }
         Some(Command::Benchmark { duration, message, concurrent }) => {
             benchmark_messages(&mut chat_client, &target_node_id.to_string(), message, duration, concurrent).await?;
+            std::process::exit(0);
+        }
+        Some(Command::Shutdown) => {
+            shutdown_node(&mut node_client).await?;
             std::process::exit(0);
         }
         None => {
@@ -766,6 +818,18 @@ async fn list_peers(
     Ok(())
 }
 
+async fn shutdown_node(
+    client: &mut NodeServiceClient<IrohChannel>,
+) -> Result<()> {
+    println!("Requesting graceful shutdown of target node...");
+    
+    let request = Request::new(Empty {});
+    let _response = client.shutdown(request).await?;
+    
+    println!("Shutdown request sent successfully");
+    Ok(())
+}
+
 async fn benchmark_messages(
     client: &mut P2pChatServiceClient<IrohChannel>,
     recipient_id: &str,
@@ -773,7 +837,7 @@ async fn benchmark_messages(
     duration_secs: u64,
     max_concurrent: usize,
 ) -> Result<()> {
-    info!("Starting benchmark: {} seconds, max {} concurrent messages", duration_secs, max_concurrent);
+    println!("Starting benchmark: {} seconds, max {} concurrent messages", duration_secs, max_concurrent);
     
     let start_time = std::time::Instant::now();
     let duration = std::time::Duration::from_secs(duration_secs);
@@ -786,7 +850,7 @@ async fn benchmark_messages(
         while tasks.len() < max_concurrent && start_time.elapsed() < duration {
             let mut client_clone = client.clone();
             let recipient_id = recipient_id.to_string();
-            let content = format!("{} #{}", message_content, message_count);
+            let content = format!("{message_content} #{message_count}");
             message_count += 1;
             
             tasks.spawn(async move {
@@ -848,13 +912,13 @@ async fn benchmark_messages(
     let success_count = message_count - error_count;
     let success_rate = (success_count as f64 / message_count as f64) * 100.0;
     
-    info!("=== Benchmark Results ===");
-    info!("Duration: {:.2}s", elapsed.as_secs_f64());
-    info!("Total messages: {}", message_count);
-    info!("Successful: {} ({:.1}%)", success_count, success_rate);
-    info!("Errors: {}", error_count);
-    info!("Messages/sec: {:.2}", messages_per_sec);
-    info!("Avg latency: {:.2}ms", elapsed.as_millis() as f64 / message_count as f64);
+    println!("=== Benchmark Results ===");
+    println!("Duration: {:.2}s", elapsed.as_secs_f64());
+    println!("Total messages: {}", message_count);
+    println!("Successful: {} ({:.1}%)", success_count, success_rate);
+    println!("Errors: {}", error_count);
+    println!("Messages/sec: {:.2}", messages_per_sec);
+    println!("Avg latency: {:.2}ms", elapsed.as_millis() as f64 / message_count as f64);
     
     Ok(())
 }
@@ -866,7 +930,7 @@ fn format_timestamp(timestamp: i64) -> String {
     let datetime = UNIX_EPOCH + duration;
     
     match datetime.duration_since(SystemTime::now()) {
-        Ok(_) => format!("future+{}s", timestamp),
+        Ok(_) => format!("future+{timestamp}s"),
         Err(e) => format!("{}s ago", e.duration().as_secs()),
     }
 }

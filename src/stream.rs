@@ -8,7 +8,10 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tonic::transport::server::Connected;
 
 // Helper function to convert any error to IO error
-fn error_to_io<E: std::error::Error + Send + Sync + 'static>(e: E, kind: std::io::ErrorKind) -> std::io::Error {
+fn error_to_io<E: std::error::Error + Send + Sync + 'static>(
+    e: E,
+    kind: std::io::ErrorKind,
+) -> std::io::Error {
     std::io::Error::new(kind, e)
 }
 
@@ -40,7 +43,11 @@ impl IrohStream {
         recv: iroh::endpoint::RecvStream,
         peer_info: IrohPeerInfo,
     ) -> Self {
-        Self { send, recv, peer_info }
+        Self {
+            send,
+            recv,
+            peer_info,
+        }
     }
 }
 
@@ -52,7 +59,9 @@ impl AsyncRead for IrohStream {
     ) -> Poll<std::io::Result<()>> {
         match Pin::new(&mut self.recv).poll_read(cx, buf) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => Poll::Ready(Err(error_to_io(e, std::io::ErrorKind::UnexpectedEof))),
+            Poll::Ready(Err(e)) => {
+                Poll::Ready(Err(error_to_io(e, std::io::ErrorKind::UnexpectedEof)))
+            }
             Poll::Pending => Poll::Pending,
         }
     }
@@ -72,10 +81,7 @@ impl AsyncWrite for IrohStream {
         }
     }
 
-    fn poll_flush(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         match Pin::new(&mut self.send).poll_flush(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
             Poll::Ready(Err(e)) => Poll::Ready(Err(error_to_io(e, std::io::ErrorKind::BrokenPipe))),
@@ -83,10 +89,7 @@ impl AsyncWrite for IrohStream {
         }
     }
 
-    fn poll_shutdown(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         match Pin::new(&mut self.send).poll_shutdown(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
             Poll::Ready(Err(e)) => Poll::Ready(Err(error_to_io(e, std::io::ErrorKind::BrokenPipe))),

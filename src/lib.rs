@@ -10,5 +10,5 @@ pub mod stream;
 // Re-export key types
 pub use client::{connect_with_alpn, IrohChannel, IrohClient};
 pub use error::{Error, Result};
-pub use server::{GrpcProtocolHandler, IrohIncoming, service_to_alpn};
-pub use stream::{IrohStream, IrohPeerInfo};
+pub use server::{service_to_alpn, GrpcProtocolHandler, IrohIncoming};
+pub use stream::{IrohPeerInfo, IrohStream};

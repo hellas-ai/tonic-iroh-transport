@@ -58,7 +58,7 @@ async fn main() -> Result<()> {
             .add_service(EchoServer::new(EchoService))
             .serve_with_incoming(incoming);
         if let Err(e) = server.await {
-            eprintln!("Server error: {}", e);
+            eprintln!("Server error: {e}");
         }
     });
 
