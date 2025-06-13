@@ -1,0 +1,21 @@
+[package]
+name = "tonic-iroh-echo"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "echo"
+path = "src/main.rs"
+
+[dependencies]
+tonic-iroh-transport = { path = "../.." }
+tonic = { version = "0.13", features = ["prost"] }
+prost = "0.13"
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "signal"] }
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+iroh = { git = "https://github.com/n0-computer/iroh.git", branch = "main" }
+
+[build-dependencies]
+tonic-build = "0.13"

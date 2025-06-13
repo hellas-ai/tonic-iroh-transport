@@ -1,0 +1,20 @@
+# Rust
+target/
+Cargo.lock
+
+# Vendor directory (3rd party libraries)
+/vendor/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+.claude

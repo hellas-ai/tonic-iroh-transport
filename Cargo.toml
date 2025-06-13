@@ -1,0 +1,59 @@
+[package]
+name = "tonic-iroh-transport"
+version = "0.1.0"
+edition = "2021"
+description = "Transport layer for using tonic gRPC over iroh p2p connections"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/n0-computer/tonic-iroh"
+keywords = ["grpc", "p2p", "iroh", "tonic", "transport"]
+categories = ["network-programming", "api-bindings"]
+
+
+[dependencies]
+# Core transport dependencies
+iroh = { git = "https://github.com/n0-computer/iroh.git", branch = "main" }
+iroh-base = { git = "https://github.com/n0-computer/iroh.git", branch = "main" }
+tonic = { version = "0.13", features = ["transport", "codegen", "prost"], default-features = false }
+
+# Async runtime and utilities
+tokio = { version = "1.0", features = ["io-util", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["io"] }
+tokio-stream = "0.1"
+
+# HTTP/2 and networking
+http = "1.0"
+hyper-util = { version = "0.1", features = ["tokio"] }
+
+# Utilities
+tower = { version = "0.4", features = ["util"] }
+pin-project = "1.0"
+futures-util = "0.3"
+bytes = "1.0"
+
+# Error handling and tracing
+thiserror = "1.0"
+tracing = "0.1"
+
+# Crypto and utilities
+rand = "0.8"
+url = "2.4"
+
+# Optional features  
+serde = { version = "1.0", features = ["derive"], optional = true }
+
+[features]
+default = []
+serde = ["dep:serde"]
+
+[dev-dependencies]
+tokio-test = "0.4"
+tracing-subscriber = "0.3"
+anyhow = "1.0"
+async-trait = "0.1"
+# Example dependencies
+clap = { version = "4.0", features = ["derive"] }
+prost = "0.13"
+tokio-stream = "0.1"
+
+[build-dependencies]
+tonic-build = "0.13"
