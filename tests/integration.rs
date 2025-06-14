@@ -1,6 +1,6 @@
 //! End-to-end integration tests for tonic-iroh-transport
 
-use iroh::protocol::AcceptError;
+use futures_util::future::BoxFuture;
 use std::time::Duration;
 use tokio::time::timeout;
 use tonic_iroh_transport::{GrpcProtocolHandler, IrohClient, IrohStream};
@@ -110,8 +110,13 @@ async fn test_iroh_client() {
 struct TestProtocolHandler;
 
 impl iroh::protocol::ProtocolHandler for TestProtocolHandler {
-    async fn accept(&self, _connection: iroh::endpoint::Connection) -> Result<(), AcceptError> {
-        println!("Test protocol handler accepted connection");
-        Ok(())
+    fn accept(
+        &self,
+        _connection: iroh::endpoint::Connection,
+    ) -> BoxFuture<'static, anyhow::Result<()>> {
+        Box::pin(async move {
+            println!("Test protocol handler accepted connection");
+            Ok(())
+        })
     }
 }

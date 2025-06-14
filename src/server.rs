@@ -1,7 +1,7 @@
 //! Simple server integration for tonic over iroh.
 
 use crate::stream::IrohStream;
-use futures_util::Stream;
+use futures_util::{future::BoxFuture, Stream};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -96,77 +96,78 @@ impl GrpcProtocolHandler {
 }
 
 impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
-    async fn accept(
+    fn accept(
         &self,
         connection: iroh::endpoint::Connection,
-    ) -> std::result::Result<(), iroh::protocol::AcceptError> {
-        let remote_node_id =
-            connection
-                .remote_node_id()
-                .map_err(|e| iroh::protocol::AcceptError::User {
-                    source: Box::new(e),
-                })?;
-
-        info!(
-            "Accepting gRPC connection for service '{}' from peer: {}",
-            self.service_name, remote_node_id
-        );
-
+    ) -> BoxFuture<'static, anyhow::Result<()>> {
         // Spawn a task to handle this connection's streams (stream-per-call model)
         let sender = self.sender.clone();
         let service_name = self.service_name.clone();
 
-        tokio::spawn(async move {
-            loop {
-                // Each accept_bi() call represents one gRPC call
-                match connection.accept_bi().await {
-                    Ok((send, recv)) => {
-                        debug!("Accepted new stream for service '{}'", service_name);
+        Box::pin(async move {
+            let remote_node_id = connection.remote_node_id()?;
 
-                        // Create context for this stream
-                        let context = crate::stream::IrohContext {
-                            node_id: remote_node_id,
-                            connection: connection.clone(),
-                            established_at: std::time::Instant::now(),
-                            alpn: connection.alpn().unwrap_or_default(),
-                        };
+            info!(
+                "Accepting gRPC connection for service '{}' from peer: {}",
+                service_name, remote_node_id
+            );
 
-                        // Create IrohStream for this gRPC call
-                        let stream = IrohStream::new(send, recv, context);
+            let service_name_clone = service_name.clone();
+            tokio::spawn(async move {
+                loop {
+                    // Each accept_bi() call represents one gRPC call
+                    match connection.accept_bi().await {
+                        Ok((send, recv)) => {
+                            debug!("Accepted new stream for service '{}'", service_name_clone);
 
-                        // Send to tonic's serve_with_incoming (don't wrap in TokioIo)
-                        if let Err(e) = sender.send(Ok(stream)) {
-                            error!(
-                                "Failed to send stream to handler for service '{}': {}",
-                                service_name, e
-                            );
+                            // Create context for this stream
+                            let context = crate::stream::IrohContext {
+                                node_id: remote_node_id,
+                                connection: connection.clone(),
+                                established_at: std::time::Instant::now(),
+                                alpn: connection.alpn().unwrap_or_default(),
+                            };
+
+                            // Create IrohStream for this gRPC call
+                            let stream = IrohStream::new(send, recv, context);
+
+                            // Send to tonic's serve_with_incoming (don't wrap in TokioIo)
+                            if let Err(e) = sender.send(Ok(stream)) {
+                                error!(
+                                    "Failed to send stream to handler for service '{}': {}",
+                                    service_name_clone, e
+                                );
+                                break;
+                            }
+                        }
+                        Err(_) => {
+                            // Connection closed or error
+                            debug!("Connection closed for service '{}'", service_name_clone);
                             break;
                         }
                     }
-                    Err(_) => {
-                        // Connection closed or error
-                        debug!("Connection closed for service '{}'", service_name);
-                        break;
-                    }
                 }
-            }
-        });
+            });
 
-        info!(
-            "Successfully set up stream handler for service '{}' from peer: {}",
-            self.service_name, remote_node_id
-        );
+            info!(
+                "Successfully set up stream handler for service '{}' from peer: {}",
+                service_name, remote_node_id
+            );
 
-        Ok(())
+            Ok(())
+        })
     }
 
-    async fn shutdown(&self) {
-        debug!(
-            "Shutting down gRPC protocol handler for service: {}",
-            self.service_name
-        );
-        // The spawned tasks will end when the connection closes
-        // The incoming stream will end when the sender is dropped
+    fn shutdown(&self) -> BoxFuture<'static, ()> {
+        let service_name = self.service_name.clone();
+        Box::pin(async move {
+            debug!(
+                "Shutting down gRPC protocol handler for service: {}",
+                service_name
+            );
+            // The spawned tasks will end when the connection closes
+            // The incoming stream will end when the sender is dropped
+        })
     }
 }
 

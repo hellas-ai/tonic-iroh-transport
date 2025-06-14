@@ -444,11 +444,9 @@ async fn main() -> Result<()> {
 
     println!("Node ID: {node_id}");
 
-    let local_addrs = endpoint.bound_sockets();
-    if let Some(socket_addr) = local_addrs.first() {
-        let node_addr = NodeAddr::new(endpoint.node_id()).with_direct_addresses([*socket_addr]);
-        info!("Node Address: {:?}", node_addr);
-    }
+    let (ipv4_addr, _ipv6_addr) = endpoint.bound_sockets();
+    let node_addr = NodeAddr::new(endpoint.node_id()).with_direct_addresses([ipv4_addr]);
+    info!("Node Address: {:?}", node_addr);
 
     let (chat_state, mut shutdown_rx) = ChatState::new(node_id.clone(), args.max_requests);
     let chat_service = ChatServiceImpl::new(chat_state.clone());

@@ -80,10 +80,9 @@ async fn main() -> Result<()> {
     info!("Client Node ID: {}", client_endpoint.node_id());
 
     // Connect to the server
-    let server_addr = if let Some(socket_addr) = server_endpoint.bound_sockets().first() {
-        NodeAddr::new(server_node_id).with_direct_addresses([*socket_addr])
-    } else {
-        NodeAddr::new(server_node_id)
+    let server_addr = {
+        let (ipv4_addr, _ipv6_addr) = server_endpoint.bound_sockets();
+        NodeAddr::new(server_node_id).with_direct_addresses([ipv4_addr])
     };
 
     info!("Connecting to server at: {:?}", server_addr);

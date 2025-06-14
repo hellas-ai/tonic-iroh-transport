@@ -8,24 +8,16 @@ name = "p2p-chat"
 path = "src/main.rs"
 
 [dependencies]
-# Core dependencies
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "net", "io-util"] }
 tokio-stream = "0.1"
 tonic = { version = "0.13", features = ["prost"] }
 prost = "0.13"
-iroh = { git = "https://github.com/n0-computer/iroh.git", branch = "main" }
-
-# Our transport bridge (will be implemented)
+iroh = { version = "0.35" }
 tonic-iroh-transport = { path = "../.." }
-
-# Utilities
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1.0"
 clap = { version = "4.0", features = ["derive"] }
-serde = { version = "1.0", features = ["derive"] }
-toml = "0.8"
-async-trait = "0.1"
 
 [build-dependencies]
 tonic-build = "0.13"

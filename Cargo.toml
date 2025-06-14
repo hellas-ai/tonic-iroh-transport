@@ -14,39 +14,17 @@ allow-branch = ["master"]
 pre-release-hook = ["make", "all"]
 
 [dependencies]
-# Core transport dependencies
-iroh = { git = "https://github.com/n0-computer/iroh.git", branch = "main" }
-tonic = { version = "0.13", features = ["transport", "codegen", "prost"], default-features = false }
-
-# Async runtime and utilities
-tokio = { version = "1.0", features = ["io-util", "sync", "time"] }
-tokio-util = { version = "0.7", features = ["io"] }
-tokio-stream = "0.1"
-
-# HTTP/2 and networking
-http = "1.0"
-hyper-util = { version = "0.1", features = ["tokio"] }
-
-# Utilities
-tower = { version = "0.4", features = ["util"] }
-pin-project = "1.0"
-futures-util = "0.3"
-bytes = "1.0"
-
-# Error handling and tracing
-thiserror = "1.0"
-tracing = "0.1"
-
-# Crypto and utilities
-rand = "0.8"
-url = "2.4"
-
-# Optional features  
-serde = { version = "1.0", features = ["derive"], optional = true }
-
-[features]
-default = []
-serde = ["dep:serde"]
+iroh = { version = "0.35", default-features = false }
+tonic = { version = "0.13", features = ["transport", "channel", "server"], default-features = false }
+tokio = { version = "1.0", default-features = false }
+tokio-stream = { version = "0.1", default-features = false }
+http = { version = "1.0", default-features = false }
+hyper-util = { version = "0.1", default-features = false }
+tower = { version = "0.4", features = ["util"], default-features = false }
+futures-util = { version = "0.3", default-features = false }
+thiserror = { version = "1.0", default-features = false }
+tracing = { version = "0.1", default-features = false }
+anyhow = "1.0"
 
 [dev-dependencies]
 tokio-test = "0.4"

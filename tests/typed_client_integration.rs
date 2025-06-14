@@ -59,10 +59,9 @@ async fn test_typed_client_multiple_connections() {
     info!("Client1 Node ID: {}", client1_endpoint.node_id());
     info!("Client2 Node ID: {}", client2_endpoint.node_id());
 
-    let server_addr = if let Some(socket_addr) = server_endpoint.bound_sockets().first() {
-        iroh::NodeAddr::new(server_node_id).with_direct_addresses([*socket_addr])
-    } else {
-        iroh::NodeAddr::new(server_node_id)
+    let server_addr = {
+        let (ipv4_addr, _ipv6_addr) = server_endpoint.bound_sockets();
+        iroh::NodeAddr::new(server_node_id).with_direct_addresses([ipv4_addr])
     };
 
     // Test our typed client connections
@@ -162,10 +161,9 @@ async fn test_concurrent_typed_clients() {
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let server_addr = if let Some(socket_addr) = server_endpoint.bound_sockets().first() {
-        iroh::NodeAddr::new(server_node_id).with_direct_addresses([*socket_addr])
-    } else {
-        iroh::NodeAddr::new(server_node_id)
+    let server_addr = {
+        let (ipv4_addr, _ipv6_addr) = server_endpoint.bound_sockets();
+        iroh::NodeAddr::new(server_node_id).with_direct_addresses([ipv4_addr])
     };
 
     // Create multiple clients concurrently

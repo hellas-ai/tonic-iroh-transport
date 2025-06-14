@@ -29,6 +29,8 @@
             cargo-udeps
             cargo-outdated
             cargo-release
+            cargo-machete
+            cargo-unused-features
             protobuf
           ];
 
