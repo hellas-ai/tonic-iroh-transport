@@ -1,7 +1,7 @@
 [package]
 name = "tonic-iroh-transport"
 authors = ["George Whewell <george@hellas.ai>"]
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 description = "Transport layer for using tonic gRPC over iroh p2p connections"
 license = "MIT OR Apache-2.0"
