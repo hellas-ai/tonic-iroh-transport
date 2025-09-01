@@ -1,7 +1,7 @@
 //! Simple server integration for tonic over iroh.
 
 use crate::stream::IrohStream;
-use futures_util::{future::BoxFuture, Stream};
+use futures_util::Stream;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -99,12 +99,13 @@ impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
     fn accept(
         &self,
         connection: iroh::endpoint::Connection,
-    ) -> BoxFuture<'static, anyhow::Result<()>> {
+    ) -> impl futures_util::Future<Output = Result<(), iroh::protocol::AcceptError>> + std::marker::Send
+    {
         // Spawn a task to handle this connection's streams (stream-per-call model)
         let sender = self.sender.clone();
         let service_name = self.service_name.clone();
 
-        Box::pin(async move {
+        async move {
             let remote_node_id = connection.remote_node_id()?;
 
             info!(
@@ -154,20 +155,20 @@ impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
                 service_name, remote_node_id
             );
 
-            Ok(())
-        })
+            Ok::<(), iroh::protocol::AcceptError>(())
+        }
     }
 
-    fn shutdown(&self) -> BoxFuture<'static, ()> {
+    fn shutdown(&self) -> impl futures_util::Future<Output = ()> + std::marker::Send {
         let service_name = self.service_name.clone();
-        Box::pin(async move {
+        async move {
             debug!(
                 "Shutting down gRPC protocol handler for service: {}",
                 service_name
             );
             // The spawned tasks will end when the connection closes
             // The incoming stream will end when the sender is dropped
-        })
+        }
     }
 }
 
