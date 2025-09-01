@@ -81,8 +81,8 @@ async fn main() -> Result<()> {
 
     // Connect to the server
     let server_addr = {
-        let (ipv4_addr, _ipv6_addr) = server_endpoint.bound_sockets();
-        NodeAddr::new(server_node_id).with_direct_addresses([ipv4_addr])
+        let addrs = server_endpoint.bound_sockets();
+        NodeAddr::new(server_node_id).with_direct_addresses(addrs)
     };
 
     info!("Connecting to server at: {:?}", server_addr);

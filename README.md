@@ -30,11 +30,11 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-tonic-iroh-transport = "1.0"
+tonic-iroh-transport = "0.0.3" # or path = ".." in a workspace
 tonic = { version = "0.13", features = ["prost"] }
 prost = "0.13"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
-iroh = { git = "https://github.com/n0-computer/iroh.git", branch = "main" }
+iroh = { version = "0.91" }
 anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
@@ -94,7 +94,7 @@ Implement your gRPC service handler:
 
 ```rust
 use pb::echo::{echo_server::Echo, EchoRequest, EchoResponse};
-use tonic_iroh_transport::IrohPeerInfo;
+use tonic_iroh_transport::IrohContext;
 
 #[derive(Clone)]
 struct EchoService;
@@ -103,9 +103,9 @@ struct EchoService;
 impl Echo for EchoService {
     async fn echo(&self, request: Request<EchoRequest>) -> Result<Response<EchoResponse>, Status> {
         // Extract peer info from the P2P connection
-        let peer_info = request.extensions().get::<IrohPeerInfo>().cloned();
-        let peer_id = peer_info
-            .map(|info| info.node_id.to_string())
+        let context = request.extensions().get::<IrohContext>().cloned();
+        let peer_id = context
+            .map(|ctx| ctx.node_id.to_string())
             .unwrap_or_else(|| "unknown".to_string());
         
         let req = request.into_inner();
@@ -118,7 +118,7 @@ impl Echo for EchoService {
 }
 ```
 
-The `IrohPeerInfo` extension provides details about the P2P connection.
+The `IrohContext` extension provides details about the P2P connection.
 
 ### 5. Server Setup
 
