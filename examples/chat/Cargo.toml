@@ -10,7 +10,8 @@ path = "src/main.rs"
 [dependencies]
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "net", "io-util"] }
 tokio-stream = "0.1"
-tonic = { version = "0.14", features = ["prost"] }
+tonic = { version = "0.14" }
+tonic-prost = "0.14"
 prost = "0.14"
 iroh = { version = "0.91" }
 tonic-iroh-transport = { path = "../.." }
@@ -20,7 +21,7 @@ anyhow = "1.0"
 clap = { version = "4.0", features = ["derive"] }
 
 [build-dependencies]
-tonic-build = "0.14"
+tonic-prost-build = "0.14"
 
 [dev-dependencies]
 tokio-test = "0.4"
