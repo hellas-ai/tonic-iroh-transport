@@ -1,3 +1,11 @@
+<div style="text-align: center;" align="center">
+
+[![Crate][crate_img]][crate_link]
+[![License][license_img]][license_file]
+[![Documentation][docs_img]][docs_link]
+
+</div>
+
 # tonic-iroh-transport
 
 A transport layer that enables [tonic](https://github.com/hyperium/tonic) gRPC services to run over [iroh](https://github.com/n0-computer/iroh) peer-to-peer connections.
@@ -231,3 +239,10 @@ make examples
 ## License
 
 MIT OR Apache-2.0
+
+[crate_link]: https://crates.io/crates/tonic-iroh-transport "Crate listing"
+[crate_img]: https://img.shields.io/crates/v/tonic-iroh-transport.svg?style=for-the-badge&color=f46623 "Crate badge"
+[docs_link]: https://docs.rs/tonic-iroh-transport/latest/tonic-iroh-transport "Crate documentation"
+[docs_img]: https://img.shields.io/docsrs/tonic-iroh-transport/latest.svg?style=for-the-badge "Documentation badge"
+[license_file]: https://github.com/hellas-ai/tonic-iroh-transport/blob/master/LICENSE "Project license"
+[license_img]: https://img.shields.io/crates/l/tonic-iroh-transport.svg?style=for-the-badge "License badge"
