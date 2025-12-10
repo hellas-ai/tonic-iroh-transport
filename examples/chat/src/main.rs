@@ -21,7 +21,7 @@ use pb::p2p_chat::{
     *,
 };
 
-use iroh::{EndpointAddr, EndpointId, SecretKey};
+use tonic_iroh_transport::iroh::{self, EndpointAddr, EndpointId, SecretKey};
 use tonic_iroh_transport::{GrpcProtocolHandler, IrohChannel, IrohClient, IrohContext};
 
 #[derive(Parser)]

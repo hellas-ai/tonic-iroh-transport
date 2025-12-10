@@ -1,13 +1,16 @@
-use iroh::endpoint::RelayMode;
-use iroh::TransportAddr;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::time::timeout;
+use tonic_iroh_transport::iroh::{
+    endpoint::{Connection, RelayMode},
+    protocol::{AcceptError, ProtocolHandler, Router},
+    Endpoint, EndpointAddr, EndpointId, TransportAddr,
+};
 use tonic_iroh_transport::{GrpcProtocolHandler, IrohClient, IrohStream};
 
 /// Create a local-only endpoint with relays and discovery disabled for testing.
-async fn local_endpoint() -> iroh::Endpoint {
-    iroh::Endpoint::builder()
+async fn local_endpoint() -> Endpoint {
+    Endpoint::builder()
         .relay_mode(RelayMode::Disabled)
         .clear_discovery()
         .bind()
@@ -51,11 +54,11 @@ async fn test_basic_iroh_connection() {
 
     let handler = TestProtocolHandler;
     let addrs2 = endpoint2.bound_sockets();
-    let router2 = iroh::protocol::Router::builder(endpoint2.clone())
+    let router2 = Router::builder(endpoint2.clone())
         .accept(b"/test/1.0", handler)
         .spawn();
 
-    let node_addr2 = iroh::EndpointAddr::new(endpoint2.id()).with_addrs(to_localhost_addrs(addrs2));
+    let node_addr2 = EndpointAddr::new(endpoint2.id()).with_addrs(to_localhost_addrs(addrs2));
     let conn = timeout(
         Duration::from_secs(5),
         endpoint1.connect(node_addr2, b"/test/1.0"),
@@ -96,7 +99,7 @@ async fn test_typed_client_connections() {
     let server = local_endpoint().await;
     let (handler, _incoming, alpn) = GrpcProtocolHandler::for_service::<TestService>();
 
-    let _router = iroh::protocol::Router::builder(server.clone())
+    let _router = Router::builder(server.clone())
         .accept(alpn.clone(), handler)
         .spawn();
 
@@ -104,7 +107,7 @@ async fn test_typed_client_connections() {
     let client = IrohClient::new(client_endpoint);
 
     let addr =
-        iroh::EndpointAddr::new(server.id()).with_addrs(to_localhost_addrs(server.bound_sockets()));
+        EndpointAddr::new(server.id()).with_addrs(to_localhost_addrs(server.bound_sockets()));
 
     let result = timeout(
         Duration::from_secs(2),
@@ -121,12 +124,12 @@ async fn test_concurrent_connections() {
     let server = local_endpoint().await;
     let (handler, _incoming, alpn) = GrpcProtocolHandler::for_service::<TestService>();
 
-    let _router = iroh::protocol::Router::builder(server.clone())
+    let _router = Router::builder(server.clone())
         .accept(alpn, handler)
         .spawn();
 
     let addr =
-        iroh::EndpointAddr::new(server.id()).with_addrs(to_localhost_addrs(server.bound_sockets()));
+        EndpointAddr::new(server.id()).with_addrs(to_localhost_addrs(server.bound_sockets()));
 
     let tasks: Vec<_> = (0..5)
         .map(|_| {
@@ -157,7 +160,7 @@ async fn test_multiple_services() {
     let (handler1, _incoming1, alpn1) = GrpcProtocolHandler::for_service::<TestService>();
     let (handler2, _incoming2, alpn2) = GrpcProtocolHandler::for_service::<AltService>();
 
-    let _router = iroh::protocol::Router::builder(server.clone())
+    let _router = Router::builder(server.clone())
         .accept(alpn1.clone(), handler1)
         .accept(alpn2.clone(), handler2)
         .spawn();
@@ -166,7 +169,7 @@ async fn test_multiple_services() {
     let client = IrohClient::new(client_endpoint);
 
     let addr =
-        iroh::EndpointAddr::new(server.id()).with_addrs(to_localhost_addrs(server.bound_sockets()));
+        EndpointAddr::new(server.id()).with_addrs(to_localhost_addrs(server.bound_sockets()));
 
     let channel1 = timeout(
         Duration::from_secs(2),
@@ -196,8 +199,8 @@ async fn test_connection_timeout() {
     let client_endpoint = local_endpoint().await;
     let client = IrohClient::new(client_endpoint);
 
-    let fake_node_id = iroh::EndpointId::from_bytes(&[0u8; 32]).unwrap();
-    let addr = iroh::EndpointAddr::new(fake_node_id);
+    let fake_node_id = EndpointId::from_bytes(&[0u8; 32]).unwrap();
+    let addr = EndpointAddr::new(fake_node_id);
 
     let result = timeout(
         Duration::from_millis(500),
@@ -211,12 +214,11 @@ async fn test_connection_timeout() {
 #[derive(Clone, Debug)]
 struct TestProtocolHandler;
 
-impl iroh::protocol::ProtocolHandler for TestProtocolHandler {
+impl ProtocolHandler for TestProtocolHandler {
     fn accept(
         &self,
-        _connection: iroh::endpoint::Connection,
-    ) -> impl futures_util::Future<Output = Result<(), iroh::protocol::AcceptError>> + std::marker::Send
-    {
-        async move { Ok::<(), iroh::protocol::AcceptError>(()) }
+        _connection: Connection,
+    ) -> impl futures_util::Future<Output = Result<(), AcceptError>> + std::marker::Send {
+        async move { Ok::<(), AcceptError>(()) }
     }
 }

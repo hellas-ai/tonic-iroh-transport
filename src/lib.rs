@@ -2,6 +2,8 @@
 
 #![deny(missing_docs)]
 
+pub use iroh;
+
 pub mod client;
 pub mod error;
 pub mod server;

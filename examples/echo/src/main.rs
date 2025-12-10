@@ -1,5 +1,4 @@
 use anyhow::Result;
-use iroh::EndpointAddr;
 use pb::echo::{
     echo_client::EchoClient,
     echo_server::{Echo, EchoServer},
@@ -7,6 +6,7 @@ use pb::echo::{
 };
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
+use tonic_iroh_transport::iroh::{self, EndpointAddr};
 use tonic_iroh_transport::{GrpcProtocolHandler, IrohClient, IrohContext};
 use tracing::info;
 

@@ -31,8 +31,8 @@ impl IrohClient {
     /// ```rust,no_run
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # use tonic_iroh_transport::IrohClient;
-    /// # use iroh::EndpointAddr;
-    /// # let endpoint = iroh::Endpoint::builder().bind().await?;
+    /// # use tonic_iroh_transport::iroh::{Endpoint, EndpointAddr};
+    /// # let endpoint = Endpoint::builder().bind().await?;
     /// # let target_addr = EndpointAddr::new(endpoint.id());
     ///
     /// let iroh_client = IrohClient::new(endpoint);

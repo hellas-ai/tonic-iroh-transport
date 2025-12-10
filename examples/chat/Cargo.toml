@@ -13,7 +13,6 @@ tokio-stream = "0.1"
 tonic = { version = "0.14" }
 tonic-prost = "0.14"
 prost = "0.14"
-iroh = { version = "0.95" }
 tonic-iroh-transport = { path = "../.." }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
