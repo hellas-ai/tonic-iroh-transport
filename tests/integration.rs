@@ -6,7 +6,7 @@ use tonic_iroh_transport::iroh::{
     protocol::{AcceptError, ProtocolHandler, Router},
     Endpoint, EndpointAddr, EndpointId, TransportAddr,
 };
-use tonic_iroh_transport::{GrpcProtocolHandler, IrohClient, IrohStream};
+use tonic_iroh_transport::{GrpcProtocolHandler, IrohConnect, IrohStream};
 
 /// Create a local-only endpoint with relays and discovery disabled for testing.
 async fn local_endpoint() -> Endpoint {
@@ -88,10 +88,12 @@ async fn test_grpc_protocol_handler() {
 }
 
 #[tokio::test]
-async fn test_iroh_client() {
+async fn test_iroh_connect_trait() {
+    // Test that the IrohConnect trait is implemented for NamedService types
     let endpoint = local_endpoint().await;
-    let client = IrohClient::new(endpoint.clone());
-    assert_eq!(client.endpoint().id(), endpoint.id());
+    let addr = EndpointAddr::new(endpoint.id());
+    // Just verify the builder can be created (don't actually connect)
+    let _builder = TestService::connect(&endpoint, addr);
 }
 
 #[test_log::test(tokio::test)]
@@ -104,14 +106,13 @@ async fn test_typed_client_connections() {
         .spawn();
 
     let client_endpoint = local_endpoint().await;
-    let client = IrohClient::new(client_endpoint);
 
     let addr =
         EndpointAddr::new(server.id()).with_addrs(to_localhost_addrs(server.bound_sockets()));
 
     let result = timeout(
         Duration::from_secs(2),
-        client.connect_to_service::<TestService>(addr),
+        TestService::connect(&client_endpoint, addr),
     )
     .await;
 
@@ -136,10 +137,9 @@ async fn test_concurrent_connections() {
             let addr = addr.clone();
             tokio::spawn(async move {
                 let endpoint = local_endpoint().await;
-                let client = IrohClient::new(endpoint);
                 timeout(
                     Duration::from_secs(10),
-                    client.connect_to_service::<TestService>(addr),
+                    TestService::connect(&endpoint, addr),
                 )
                 .await
                 .unwrap()
@@ -166,14 +166,13 @@ async fn test_multiple_services() {
         .spawn();
 
     let client_endpoint = local_endpoint().await;
-    let client = IrohClient::new(client_endpoint);
 
     let addr =
         EndpointAddr::new(server.id()).with_addrs(to_localhost_addrs(server.bound_sockets()));
 
     let channel1 = timeout(
         Duration::from_secs(2),
-        client.connect_to_service::<TestService>(addr.clone()),
+        TestService::connect(&client_endpoint, addr.clone()),
     )
     .await
     .unwrap()
@@ -181,7 +180,7 @@ async fn test_multiple_services() {
 
     let channel2 = timeout(
         Duration::from_secs(2),
-        client.connect_to_service::<AltService>(addr),
+        AltService::connect(&client_endpoint, addr),
     )
     .await
     .unwrap()
@@ -195,20 +194,36 @@ async fn test_multiple_services() {
 }
 
 #[test_log::test(tokio::test)]
-async fn test_connection_timeout() {
+async fn test_connection_timeout_external() {
+    // Test using external tokio::time::timeout
     let client_endpoint = local_endpoint().await;
-    let client = IrohClient::new(client_endpoint);
 
     let fake_node_id = EndpointId::from_bytes(&[0u8; 32]).unwrap();
     let addr = EndpointAddr::new(fake_node_id);
 
     let result = timeout(
         Duration::from_millis(500),
-        client.connect_to_service::<TestService>(addr),
+        TestService::connect(&client_endpoint, addr),
     )
     .await;
 
     assert!(result.is_err() || result.unwrap().is_err());
+}
+
+#[test_log::test(tokio::test)]
+async fn test_connect_timeout_builtin() {
+    // Test using the built-in connect_timeout on ConnectBuilder
+    let client_endpoint = local_endpoint().await;
+
+    let fake_node_id = EndpointId::from_bytes(&[0u8; 32]).unwrap();
+    let addr = EndpointAddr::new(fake_node_id);
+
+    let result = TestService::connect(&client_endpoint, addr)
+        .connect_timeout(Duration::from_millis(100))
+        .await;
+
+    // Should fail - either with timeout or connection error
+    assert!(result.is_err());
 }
 
 #[derive(Clone, Debug)]

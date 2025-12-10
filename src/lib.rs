@@ -10,7 +10,7 @@ pub mod server;
 pub mod stream;
 
 // Re-export key types
-pub use client::{connect_with_alpn, IrohClient};
+pub use client::{connect_alpn, ConnectBuilder, IrohConnect};
 pub use error::{Error, Result};
 pub use server::{service_to_alpn, GrpcProtocolHandler, IrohIncoming};
 pub use stream::{IrohContext, IrohStream};

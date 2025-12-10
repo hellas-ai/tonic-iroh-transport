@@ -54,19 +54,29 @@ cargo run --bin client -- \
 ## Architecture
 
 ```rust
-// Server: Multiple services on one transport
-let transport = IrohTransport::builder().build().await?;
+// Server: Multiple services with separate handlers
+let endpoint = iroh::Endpoint::builder().bind().await?;
 
-IrohServerBuilder::new(transport)
-    .add_service(P2pChatServiceServer::new(chat_service))
-    .add_service(NodeServiceServer::new(node_service))
-    .serve()
-    .await?;
+let (chat_handler, chat_incoming, chat_alpn) =
+    GrpcProtocolHandler::for_service::<P2pChatServiceServer<ChatServiceImpl>>();
+let (node_handler, node_incoming, node_alpn) =
+    GrpcProtocolHandler::for_service::<NodeServiceServer<NodeServiceImpl>>();
 
-// Client: Multiple clients on one channel
-let channel = IrohChannel::connect(transport, target).await?;
-let mut chat_client = P2pChatServiceClient::new(channel.clone());
-let mut node_client = NodeServiceClient::new(channel);
+let _router = iroh::protocol::Router::builder(endpoint)
+    .accept(chat_alpn, chat_handler)
+    .accept(node_alpn, node_handler)
+    .spawn();
+
+// Client: Connect to each service using IrohConnect
+use tonic_iroh_transport::IrohConnect;
+
+let chat_channel =
+    P2pChatServiceServer::<ChatServiceImpl>::connect(&endpoint, target.clone()).await?;
+let node_channel =
+    NodeServiceServer::<NodeServiceImpl>::connect(&endpoint, target).await?;
+
+let mut chat_client = P2pChatServiceClient::new(chat_channel);
+let mut node_client = NodeServiceClient::new(node_channel);
 ```
 
-This demonstrates how multiple gRPC services can share a single P2P connection, with automatic service routing via ALPN protocols.
+This demonstrates how multiple gRPC services can be hosted on the same endpoint, with automatic service routing via ALPN protocols.

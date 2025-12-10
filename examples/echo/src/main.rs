@@ -7,7 +7,7 @@ use pb::echo::{
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 use tonic_iroh_transport::iroh::{self, EndpointAddr};
-use tonic_iroh_transport::{GrpcProtocolHandler, IrohClient, IrohContext};
+use tonic_iroh_transport::{GrpcProtocolHandler, IrohConnect, IrohContext};
 use tracing::info;
 
 // Generated protobuf code
@@ -91,10 +91,7 @@ async fn main() -> Result<()> {
 
     info!("Connecting to server at: {:?}", server_addr);
 
-    let iroh_client = IrohClient::new(client_endpoint);
-    let channel = iroh_client
-        .connect_to_service::<EchoServer<EchoService>>(server_addr)
-        .await?;
+    let channel = EchoServer::<EchoService>::connect(&client_endpoint, server_addr).await?;
     let mut client = EchoClient::new(channel);
 
     // Test a few echo calls

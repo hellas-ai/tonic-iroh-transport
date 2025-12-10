@@ -32,15 +32,22 @@ service Echo {
   rpc Echo(EchoRequest) returns (EchoResponse);
 }
 
-// Server implementation
-let transport = IrohTransport::builder().build().await?;
-IrohServerBuilder::new(transport)
-    .add_service(EchoServer::new(echo_service))
-    .serve()
+// Server setup
+let endpoint = iroh::Endpoint::builder().bind().await?;
+let (handler, incoming, alpn) = GrpcProtocolHandler::for_service::<EchoServer<EchoService>>();
+let _router = iroh::protocol::Router::builder(endpoint)
+    .accept(alpn, handler)
+    .spawn();
+Server::builder()
+    .add_service(EchoServer::new(EchoService))
+    .serve_with_incoming(incoming)
     .await?;
 
 // Client usage
-let channel = IrohChannel::connect(transport, target).await?;
+use tonic_iroh_transport::IrohConnect;
+
+let endpoint = iroh::Endpoint::builder().bind().await?;
+let channel = EchoServer::<EchoService>::connect(&endpoint, server_addr).await?;
 let mut client = EchoClient::new(channel);
 let response = client.echo(request).await?;
 ```

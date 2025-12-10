@@ -167,28 +167,38 @@ This creates an iroh endpoint, sets up the protocol handler, and starts the gRPC
 Connect to the P2P service and make calls:
 
 ```rust
-use tonic_iroh_transport::IrohClient;
-use pb::echo::{echo_client::EchoClient, EchoRequest};
+use tonic_iroh_transport::IrohConnect;
+use pb::echo::{echo_client::EchoClient, echo_server::EchoServer, EchoRequest};
 
 // Create client endpoint
 let client_endpoint = iroh::Endpoint::builder().bind().await?;
-let server_addr = NodeAddr::new(server_node_id);
+let server_addr = EndpointAddr::new(server_node_id);
 
-// Connect with type safety
-let iroh_client = IrohClient::new(client_endpoint);
-let channel = iroh_client.connect_to_service::<EchoServer<EchoService>>(server_addr).await?;
+// Connect using the IrohConnect trait
+let channel = EchoServer::<EchoService>::connect(&client_endpoint, server_addr).await?;
 let mut client = EchoClient::new(channel);
 
 // Make RPC calls
-let request = Request::new(EchoRequest { 
-    message: "Hello, P2P gRPC!".to_string() 
+let request = Request::new(EchoRequest {
+    message: "Hello, P2P gRPC!".to_string()
 });
 
 let response = client.echo(request).await?;
 println!("Response: {}", response.into_inner().message);
 ```
 
-The `IrohClient::connect_to_service` method automatically handles protocol negotiation using the service type.
+The `IrohConnect` trait is automatically implemented for all tonic server types and handles protocol negotiation.
+
+You can also configure connection options:
+
+```rust
+use std::time::Duration;
+
+// With connection timeout
+let channel = EchoServer::<EchoService>::connect(&client_endpoint, server_addr)
+    .connect_timeout(Duration::from_secs(10))
+    .await?;
+```
 
 ## Examples
 

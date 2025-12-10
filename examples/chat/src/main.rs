@@ -22,7 +22,7 @@ use pb::p2p_chat::{
 };
 
 use tonic_iroh_transport::iroh::{self, EndpointAddr, EndpointId, SecretKey};
-use tonic_iroh_transport::{GrpcProtocolHandler, IrohClient, IrohContext};
+use tonic_iroh_transport::{GrpcProtocolHandler, IrohConnect, IrohContext};
 
 #[derive(Parser)]
 #[clap(name = "p2p-chat")]
@@ -547,14 +547,11 @@ async fn connect_and_execute_command(
 
     let local_node_id = endpoint.id().to_string();
 
-    // Create typed clients using IrohClient
-    let iroh_client = IrohClient::new(endpoint);
-    let chat_channel = iroh_client
-        .connect_to_service::<P2pChatServiceServer<ChatServiceImpl>>(target_addr.clone())
-        .await?;
-    let node_channel = iroh_client
-        .connect_to_service::<NodeServiceServer<NodeServiceImpl>>(target_addr)
-        .await?;
+    // Connect to services using IrohConnect trait
+    let chat_channel =
+        P2pChatServiceServer::<ChatServiceImpl>::connect(&endpoint, target_addr.clone()).await?;
+    let node_channel =
+        NodeServiceServer::<NodeServiceImpl>::connect(&endpoint, target_addr).await?;
     let mut chat_client = P2pChatServiceClient::new(chat_channel);
     let mut node_client = NodeServiceClient::new(node_channel);
 
