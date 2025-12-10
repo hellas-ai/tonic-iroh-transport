@@ -21,7 +21,7 @@ use pb::p2p_chat::{
     *,
 };
 
-use iroh::{NodeAddr, NodeId, SecretKey};
+use iroh::{EndpointAddr, EndpointId, SecretKey};
 use tonic_iroh_transport::{GrpcProtocolHandler, IrohChannel, IrohClient, IrohContext};
 
 #[derive(Parser)]
@@ -445,7 +445,10 @@ async fn main() -> Result<()> {
     println!("Node ID: {node_id}");
 
     let addrs = endpoint.bound_sockets();
-    let node_addr = NodeAddr::new(endpoint.id()).with_direct_addresses(addrs);
+    let mut node_addr = EndpointAddr::new(endpoint.id());
+    for addr in addrs {
+        node_addr = node_addr.with_ip_addr(addr);
+    }
     info!("Node Address: {:?}", node_addr);
 
     let (chat_state, mut shutdown_rx) = ChatState::new(node_id.clone(), args.max_requests);
@@ -529,13 +532,13 @@ async fn connect_and_execute_command(
     target_addresses: Vec<String>,
     command: Option<Command>,
 ) -> Result<()> {
-    let target_node_id = NodeId::from_str(&target_node_id)?;
+    let target_node_id = EndpointId::from_str(&target_node_id)?;
     let target_addr = if target_addresses.is_empty() {
-        NodeAddr::new(target_node_id)
+        EndpointAddr::new(target_node_id)
     } else {
-        let mut addr = NodeAddr::new(target_node_id);
+        let mut addr = EndpointAddr::new(target_node_id);
         for address_str in target_addresses {
-            addr = addr.with_direct_addresses([address_str.parse()?]);
+            addr = addr.with_ip_addr(address_str.parse()?);
         }
         addr
     };

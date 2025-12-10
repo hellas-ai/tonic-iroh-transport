@@ -82,7 +82,11 @@ async fn main() -> Result<()> {
     // Connect to the server
     let server_addr = {
         let addrs = server_endpoint.bound_sockets();
-        NodeAddr::new(server_node_id).with_direct_addresses(addrs)
+        let mut addr = EndpointAddr::new(server_node_id);
+        for a in addrs {
+            addr = addr.with_ip_addr(a);
+        }
+        addr
     };
 
     info!("Connecting to server at: {:?}", server_addr);

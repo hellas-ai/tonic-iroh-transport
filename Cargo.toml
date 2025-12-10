@@ -16,9 +16,9 @@ pre-release-hook = ["make", "all"]
 [dependencies]
 iroh = { version = "0.95" }
 tonic = { version = "0.14", features = ["transport", "channel", "server"], default-features = false }
-tokio = { version = "1.0", default-features = false }
+tokio = { version = "1.48", default-features = false }
 tokio-stream = { version = "0.1", default-features = false }
-http = { version = "1.0", default-features = false }
+http = { version = "1.4", default-features = false }
 hyper-util = { version = "0.1", default-features = false }
 tower = { version = "0.4", features = ["util"], default-features = false }
 futures-util = { version = "0.3", default-features = false }
@@ -35,7 +35,7 @@ test-log = "0.2"
 cargo-release = "0.25"
 
 # Example dependencies
-clap = { version = "4.0", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 prost = "0.14"
 tokio-stream = "0.1"
 

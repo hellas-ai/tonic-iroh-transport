@@ -1,20 +1,33 @@
+use iroh::endpoint::RelayMode;
+use iroh::TransportAddr;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::time::timeout;
 use tonic_iroh_transport::{GrpcProtocolHandler, IrohClient, IrohStream};
-use iroh::TransportAddr;
+
+/// Create a local-only endpoint with relays and discovery disabled for testing.
+async fn local_endpoint() -> iroh::Endpoint {
+    iroh::Endpoint::builder()
+        .relay_mode(RelayMode::Disabled)
+        .clear_discovery()
+        .bind()
+        .await
+        .unwrap()
+}
 
 /// Convert bound socket addresses to localhost addresses for local testing.
 /// `0.0.0.0:port` -> `127.0.0.1:port`, `[::]:port` -> `[::1]:port`
 fn to_localhost_addrs(addrs: Vec<SocketAddr>) -> impl Iterator<Item = TransportAddr> {
     addrs.into_iter().map(|addr| {
         let local_addr = match addr {
-            SocketAddr::V4(v4) if v4.ip().is_unspecified() => {
-                SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), v4.port())
-            }
-            SocketAddr::V6(v6) if v6.ip().is_unspecified() => {
-                SocketAddr::new(std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST), v6.port())
-            }
+            SocketAddr::V4(v4) if v4.ip().is_unspecified() => SocketAddr::new(
+                std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+                v4.port(),
+            ),
+            SocketAddr::V6(v6) if v6.ip().is_unspecified() => SocketAddr::new(
+                std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
+                v6.port(),
+            ),
             other => other,
         };
         TransportAddr::Ip(local_addr)
@@ -33,8 +46,8 @@ impl tonic::server::NamedService for AltService {
 
 #[tokio::test]
 async fn test_basic_iroh_connection() {
-    let endpoint1 = iroh::Endpoint::builder().bind().await.unwrap();
-    let endpoint2 = iroh::Endpoint::builder().bind().await.unwrap();
+    let endpoint1 = local_endpoint().await;
+    let endpoint2 = local_endpoint().await;
 
     let handler = TestProtocolHandler;
     let addrs2 = endpoint2.bound_sockets();
@@ -42,8 +55,7 @@ async fn test_basic_iroh_connection() {
         .accept(b"/test/1.0", handler)
         .spawn();
 
-    let node_addr2 = iroh::EndpointAddr::new(endpoint2.id())
-        .with_addrs(to_localhost_addrs(addrs2));
+    let node_addr2 = iroh::EndpointAddr::new(endpoint2.id()).with_addrs(to_localhost_addrs(addrs2));
     let conn = timeout(
         Duration::from_secs(5),
         endpoint1.connect(node_addr2, b"/test/1.0"),
@@ -74,25 +86,25 @@ async fn test_grpc_protocol_handler() {
 
 #[tokio::test]
 async fn test_iroh_client() {
-    let endpoint = iroh::Endpoint::builder().bind().await.unwrap();
+    let endpoint = local_endpoint().await;
     let client = IrohClient::new(endpoint.clone());
     assert_eq!(client.endpoint().id(), endpoint.id());
 }
 
 #[test_log::test(tokio::test)]
 async fn test_typed_client_connections() {
-    let server = iroh::Endpoint::builder().bind().await.unwrap();
+    let server = local_endpoint().await;
     let (handler, _incoming, alpn) = GrpcProtocolHandler::for_service::<TestService>();
 
     let _router = iroh::protocol::Router::builder(server.clone())
         .accept(alpn.clone(), handler)
         .spawn();
 
-    let client_endpoint = iroh::Endpoint::builder().bind().await.unwrap();
+    let client_endpoint = local_endpoint().await;
     let client = IrohClient::new(client_endpoint);
 
-    let addr = iroh::EndpointAddr::new(server.id())
-        .with_addrs(to_localhost_addrs(server.bound_sockets()));
+    let addr =
+        iroh::EndpointAddr::new(server.id()).with_addrs(to_localhost_addrs(server.bound_sockets()));
 
     let result = timeout(
         Duration::from_secs(2),
@@ -106,21 +118,21 @@ async fn test_typed_client_connections() {
 
 #[test_log::test(tokio::test)]
 async fn test_concurrent_connections() {
-    let server = iroh::Endpoint::builder().bind().await.unwrap();
+    let server = local_endpoint().await;
     let (handler, _incoming, alpn) = GrpcProtocolHandler::for_service::<TestService>();
 
     let _router = iroh::protocol::Router::builder(server.clone())
         .accept(alpn, handler)
         .spawn();
 
-    let addr = iroh::EndpointAddr::new(server.id())
-        .with_addrs(to_localhost_addrs(server.bound_sockets()));
+    let addr =
+        iroh::EndpointAddr::new(server.id()).with_addrs(to_localhost_addrs(server.bound_sockets()));
 
     let tasks: Vec<_> = (0..5)
         .map(|_| {
             let addr = addr.clone();
             tokio::spawn(async move {
-                let endpoint = iroh::Endpoint::builder().bind().await.unwrap();
+                let endpoint = local_endpoint().await;
                 let client = IrohClient::new(endpoint);
                 timeout(
                     Duration::from_secs(10),
@@ -140,7 +152,7 @@ async fn test_concurrent_connections() {
 
 #[test_log::test(tokio::test)]
 async fn test_multiple_services() {
-    let server = iroh::Endpoint::builder().bind().await.unwrap();
+    let server = local_endpoint().await;
 
     let (handler1, _incoming1, alpn1) = GrpcProtocolHandler::for_service::<TestService>();
     let (handler2, _incoming2, alpn2) = GrpcProtocolHandler::for_service::<AltService>();
@@ -150,11 +162,11 @@ async fn test_multiple_services() {
         .accept(alpn2.clone(), handler2)
         .spawn();
 
-    let client_endpoint = iroh::Endpoint::builder().bind().await.unwrap();
+    let client_endpoint = local_endpoint().await;
     let client = IrohClient::new(client_endpoint);
 
-    let addr = iroh::EndpointAddr::new(server.id())
-        .with_addrs(to_localhost_addrs(server.bound_sockets()));
+    let addr =
+        iroh::EndpointAddr::new(server.id()).with_addrs(to_localhost_addrs(server.bound_sockets()));
 
     let channel1 = timeout(
         Duration::from_secs(2),
@@ -181,7 +193,7 @@ async fn test_multiple_services() {
 
 #[test_log::test(tokio::test)]
 async fn test_connection_timeout() {
-    let client_endpoint = iroh::Endpoint::builder().bind().await.unwrap();
+    let client_endpoint = local_endpoint().await;
     let client = IrohClient::new(client_endpoint);
 
     let fake_node_id = iroh::EndpointId::from_bytes(&[0u8; 32]).unwrap();
