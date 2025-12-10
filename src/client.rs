@@ -105,7 +105,3 @@ pub async fn connect_with_alpn(
     info!("Successfully connected to peer: {}", target_id);
     Ok(channel)
 }
-
-/// Type alias for a tonic Channel over iroh.
-/// This makes the examples more readable.
-pub type IrohChannel = Channel;

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
-use tonic::transport::Server;
+use tonic::transport::{Channel, Server};
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
@@ -22,7 +22,7 @@ use pb::p2p_chat::{
 };
 
 use tonic_iroh_transport::iroh::{self, EndpointAddr, EndpointId, SecretKey};
-use tonic_iroh_transport::{GrpcProtocolHandler, IrohChannel, IrohClient, IrohContext};
+use tonic_iroh_transport::{GrpcProtocolHandler, IrohClient, IrohContext};
 
 #[derive(Parser)]
 #[clap(name = "p2p-chat")]
@@ -615,7 +615,7 @@ async fn connect_and_execute_command(
 }
 
 async fn send_message(
-    client: &mut P2pChatServiceClient<IrohChannel>,
+    client: &mut P2pChatServiceClient<Channel>,
     recipient_id: &str,
     content: String,
 ) -> Result<()> {
@@ -639,7 +639,7 @@ async fn send_message(
     Ok(())
 }
 
-async fn subscribe_messages(client: &mut P2pChatServiceClient<IrohChannel>) -> Result<()> {
+async fn subscribe_messages(client: &mut P2pChatServiceClient<Channel>) -> Result<()> {
     info!("Subscribing to messages...");
 
     let request = Request::new(SubscribeRequest {});
@@ -668,7 +668,7 @@ async fn subscribe_messages(client: &mut P2pChatServiceClient<IrohChannel>) -> R
 }
 
 async fn get_history(
-    client: &mut P2pChatServiceClient<IrohChannel>,
+    client: &mut P2pChatServiceClient<Channel>,
     peer_id: &str,
     limit: i32,
 ) -> Result<()> {
@@ -703,7 +703,7 @@ async fn get_history(
 }
 
 async fn interactive_chat(
-    client: &mut P2pChatServiceClient<IrohChannel>,
+    client: &mut P2pChatServiceClient<Channel>,
     local_node_id: &str,
 ) -> Result<()> {
     info!("Starting interactive chat session. Type 'quit' to exit.");
@@ -768,10 +768,7 @@ async fn interactive_chat(
     Ok(())
 }
 
-async fn ping_node(
-    client: &mut NodeServiceClient<IrohChannel>,
-    data: Option<String>,
-) -> Result<()> {
+async fn ping_node(client: &mut NodeServiceClient<Channel>, data: Option<String>) -> Result<()> {
     let now = chrono::Utc::now().timestamp();
     let data = data.unwrap_or_else(|| "ping".to_string());
 
@@ -795,7 +792,7 @@ async fn ping_node(
     Ok(())
 }
 
-async fn get_node_info(client: &mut NodeServiceClient<IrohChannel>) -> Result<()> {
+async fn get_node_info(client: &mut NodeServiceClient<Channel>) -> Result<()> {
     info!("Getting node information...");
 
     let request = Request::new(Empty {});
@@ -815,7 +812,7 @@ async fn get_node_info(client: &mut NodeServiceClient<IrohChannel>) -> Result<()
     Ok(())
 }
 
-async fn list_peers(client: &mut NodeServiceClient<IrohChannel>) -> Result<()> {
+async fn list_peers(client: &mut NodeServiceClient<Channel>) -> Result<()> {
     info!("Listing connected peers...");
 
     let request = Request::new(Empty {});
@@ -841,7 +838,7 @@ async fn list_peers(client: &mut NodeServiceClient<IrohChannel>) -> Result<()> {
     Ok(())
 }
 
-async fn shutdown_node(client: &mut NodeServiceClient<IrohChannel>) -> Result<()> {
+async fn shutdown_node(client: &mut NodeServiceClient<Channel>) -> Result<()> {
     println!("Requesting graceful shutdown of target node...");
 
     let request = Request::new(Empty {});
@@ -852,7 +849,7 @@ async fn shutdown_node(client: &mut NodeServiceClient<IrohChannel>) -> Result<()
 }
 
 async fn benchmark_messages(
-    client: &mut P2pChatServiceClient<IrohChannel>,
+    client: &mut P2pChatServiceClient<Channel>,
     recipient_id: &str,
     message_content: String,
     duration_secs: u64,
