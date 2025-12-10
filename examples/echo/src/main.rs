@@ -1,5 +1,4 @@
 use anyhow::Result;
-use iroh::NodeAddr;
 use pb::echo::{
     echo_client::EchoClient,
     echo_server::{Echo, EchoServer},
@@ -7,7 +6,8 @@ use pb::echo::{
 };
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
-use tonic_iroh_transport::{GrpcProtocolHandler, IrohClient, IrohContext};
+use tonic_iroh_transport::iroh::{self, EndpointAddr};
+use tonic_iroh_transport::{GrpcProtocolHandler, IrohConnect, IrohContext};
 use tracing::info;
 
 // Generated protobuf code
@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
 
     // Create server endpoint
     let server_endpoint = iroh::Endpoint::builder().bind().await?;
-    let server_node_id = server_endpoint.node_id();
+    let server_node_id = server_endpoint.id();
 
     info!("Server Node ID: {}", server_node_id);
     info!(
@@ -77,20 +77,21 @@ async fn main() -> Result<()> {
 
     // Create client endpoint
     let client_endpoint = iroh::Endpoint::builder().bind().await?;
-    info!("Client Node ID: {}", client_endpoint.node_id());
+    info!("Client Node ID: {}", client_endpoint.id());
 
     // Connect to the server
     let server_addr = {
         let addrs = server_endpoint.bound_sockets();
-        NodeAddr::new(server_node_id).with_direct_addresses(addrs)
+        let mut addr = EndpointAddr::new(server_node_id);
+        for a in addrs {
+            addr = addr.with_ip_addr(a);
+        }
+        addr
     };
 
     info!("Connecting to server at: {:?}", server_addr);
 
-    let iroh_client = IrohClient::new(client_endpoint);
-    let channel = iroh_client
-        .connect_to_service::<EchoServer<EchoService>>(server_addr)
-        .await?;
+    let channel = EchoServer::<EchoService>::connect(&client_endpoint, server_addr).await?;
     let mut client = EchoClient::new(channel);
 
     // Test a few echo calls

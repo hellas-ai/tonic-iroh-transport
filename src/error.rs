@@ -7,10 +7,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Iroh connection error.
-    #[error("Iroh error: {0}")]
-    Iroh(#[from] anyhow::Error),
-
-    /// Iroh connection error.
     #[error("Iroh connection error: {0}")]
     IrohConnection(#[from] iroh::endpoint::ConnectionError),
 

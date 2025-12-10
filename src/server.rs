@@ -106,7 +106,7 @@ impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
         let service_name = self.service_name.clone();
 
         async move {
-            let remote_node_id = connection.remote_node_id()?;
+            let remote_node_id = connection.remote_id();
 
             info!(
                 "Accepting gRPC connection for service '{}' from peer: {}",
@@ -126,7 +126,7 @@ impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
                                 node_id: remote_node_id,
                                 connection: connection.clone(),
                                 established_at: std::time::Instant::now(),
-                                alpn: connection.alpn().unwrap_or_default(),
+                                alpn: connection.alpn().to_vec(),
                             };
 
                             // Create IrohStream for this gRPC call
@@ -175,7 +175,7 @@ impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
 /// Generate ALPN protocol from tonic service name.
 ///
 /// Converts "echo.Echo" -> "/echo.Echo/1.0"
-/// Converts "p2p_chat.P2PChatService" -> "/p2p_chat.P2PChatService/1.0"  
+/// Converts "p2p_chat.P2PChatService" -> "/p2p_chat.P2PChatService/1.0"
 pub fn service_to_alpn<T: tonic::server::NamedService>() -> Vec<u8> {
     let service_name = T::NAME;
     format!("/{service_name}/1.0").into_bytes()

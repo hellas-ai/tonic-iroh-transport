@@ -21,14 +21,14 @@ check:
 # Format code
 fmt:
 	@echo "Formatting code..."
-	cargo fmt
+	cargo fmt --all
 
 # Format examples
 fmt-examples:
 	@echo "Formatting chat example..."
-	cd examples/chat && cargo fmt
+	cd examples/chat && cargo fmt --all
 	@echo "Formatting echo example..."
-	cd examples/echo && cargo fmt
+	cd examples/echo && cargo fmt --all
 
 # Format all code including examples
 fmt-all: fmt fmt-examples
@@ -36,14 +36,14 @@ fmt-all: fmt fmt-examples
 # Check if code is formatted
 fmt-check:
 	@echo "Checking code formatting..."
-	cargo fmt --check
+	cargo fmt --all --check
 
 # Check if examples are formatted
 fmt-check-examples:
 	@echo "Checking chat example formatting..."
-	cd examples/chat && cargo fmt --check
+	cd examples/chat && cargo fmt --all --check
 	@echo "Checking echo example formatting..."
-	cd examples/echo && cargo fmt --check
+	cd examples/echo && cargo fmt --all --check
 
 # Check all code formatting including examples
 fmt-check-all: fmt-check fmt-check-examples
