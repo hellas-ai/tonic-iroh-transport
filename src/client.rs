@@ -3,7 +3,7 @@
 use crate::{server::service_to_alpn, stream::IrohStream, Result};
 use http::Uri;
 use hyper_util::rt::TokioIo;
-use iroh::NodeAddr;
+use iroh::EndpointAddr;
 use tonic::transport::{Channel, Endpoint};
 use tower::service_fn;
 use tracing::{debug, info};
@@ -31,9 +31,9 @@ impl IrohClient {
     /// ```rust,no_run
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// # use tonic_iroh_transport::IrohClient;
-    /// # use iroh::NodeAddr;
+    /// # use iroh::EndpointAddr;
     /// # let endpoint = iroh::Endpoint::builder().bind().await?;
-    /// # let target_addr = NodeAddr::new(endpoint.node_id());
+    /// # let target_addr = EndpointAddr::new(endpoint.id());
     ///
     /// let iroh_client = IrohClient::new(endpoint);
     /// // let channel = iroh_client.connect_to_service::<SomeServer<_>>(target_addr).await?;
@@ -41,7 +41,7 @@ impl IrohClient {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn connect_to_service<S>(&self, target: NodeAddr) -> Result<Channel>
+    pub async fn connect_to_service<S>(&self, target: EndpointAddr) -> Result<Channel>
     where
         S: tonic::server::NamedService,
     {
@@ -58,12 +58,12 @@ impl IrohClient {
 /// Connect to a remote iroh peer with a specific ALPN protocol.
 pub async fn connect_with_alpn(
     endpoint: iroh::Endpoint,
-    target: NodeAddr,
+    target: EndpointAddr,
     alpn: &[u8],
 ) -> Result<Channel> {
-    debug!("Connecting to peer: {}", target.node_id);
+    debug!("Connecting to peer: {}", target.id);
 
-    let target_id = target.node_id;
+    let target_id = target.id;
     let alpn_vec = alpn.to_vec();
 
     // Create a dummy endpoint URI (not used by connector)
@@ -74,7 +74,7 @@ pub async fn connect_with_alpn(
             let alpn = alpn_vec.clone();
 
             async move {
-                info!("Establishing iroh connection to {}", target.node_id);
+                info!("Establishing iroh connection to {}", target.id);
 
                 // Connect to the peer using iroh
                 let connection = endpoint

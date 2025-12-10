@@ -1,5 +1,5 @@
 use anyhow::Result;
-use iroh::NodeAddr;
+use iroh::EndpointAddr;
 use pb::echo::{
     echo_client::EchoClient,
     echo_server::{Echo, EchoServer},
@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
 
     // Create server endpoint
     let server_endpoint = iroh::Endpoint::builder().bind().await?;
-    let server_node_id = server_endpoint.node_id();
+    let server_node_id = server_endpoint.id();
 
     info!("Server Node ID: {}", server_node_id);
     info!(
@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
 
     // Create client endpoint
     let client_endpoint = iroh::Endpoint::builder().bind().await?;
-    info!("Client Node ID: {}", client_endpoint.node_id());
+    info!("Client Node ID: {}", client_endpoint.id());
 
     // Connect to the server
     let server_addr = {

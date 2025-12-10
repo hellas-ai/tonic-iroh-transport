@@ -440,12 +440,12 @@ async fn main() -> Result<()> {
     }
 
     let endpoint = endpoint_builder.bind().await?;
-    let node_id = endpoint.node_id().to_string();
+    let node_id = endpoint.id().to_string();
 
     println!("Node ID: {node_id}");
 
     let addrs = endpoint.bound_sockets();
-    let node_addr = NodeAddr::new(endpoint.node_id()).with_direct_addresses(addrs);
+    let node_addr = NodeAddr::new(endpoint.id()).with_direct_addresses(addrs);
     info!("Node Address: {:?}", node_addr);
 
     let (chat_state, mut shutdown_rx) = ChatState::new(node_id.clone(), args.max_requests);
@@ -542,7 +542,7 @@ async fn connect_and_execute_command(
 
     info!("Connecting to: {:?}", target_addr);
 
-    let local_node_id = endpoint.node_id().to_string();
+    let local_node_id = endpoint.id().to_string();
 
     // Create typed clients using IrohClient
     let iroh_client = IrohClient::new(endpoint);

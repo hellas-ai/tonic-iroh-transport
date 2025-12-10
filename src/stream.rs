@@ -1,6 +1,6 @@
 //! AsyncRead/AsyncWrite wrapper for iroh QUIC streams.
 
-use iroh::NodeId;
+use iroh::EndpointId;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Instant;
@@ -19,7 +19,7 @@ fn error_to_io<E: std::error::Error + Send + Sync + 'static>(
 #[derive(Debug, Clone)]
 pub struct IrohContext {
     /// The remote peer's node ID.
-    pub node_id: NodeId,
+    pub node_id: EndpointId,
     /// The actual connection.
     pub connection: iroh::endpoint::Connection,
     /// When the connection was established.

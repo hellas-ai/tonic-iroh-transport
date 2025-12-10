@@ -14,7 +14,7 @@ allow-branch = ["master"]
 pre-release-hook = ["make", "all"]
 
 [dependencies]
-iroh = { version = "0.91" }
+iroh = { version = "0.95" }
 tonic = { version = "0.14", features = ["transport", "channel", "server"], default-features = false }
 tokio = { version = "1.0", default-features = false }
 tokio-stream = { version = "0.1", default-features = false }

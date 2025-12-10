@@ -140,7 +140,7 @@ use pb::echo::echo_server::EchoServer;
 async fn main() -> Result<()> {
     // Create iroh endpoint for P2P networking
     let endpoint = iroh::Endpoint::builder().bind().await?;
-    println!("Server Node ID: {}", endpoint.node_id());
+    println!("Server Node ID: {}", endpoint.id());
 
     // Set up gRPC service with P2P transport
     let (handler, incoming, alpn) = GrpcProtocolHandler::for_service::<EchoServer<EchoService>>();
