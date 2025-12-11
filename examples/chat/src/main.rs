@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
-use tonic::transport::{Channel, Server};
+use tonic::transport::Channel;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
@@ -22,7 +22,7 @@ use pb::p2p_chat::{
 };
 
 use tonic_iroh_transport::iroh::{self, EndpointAddr, EndpointId, SecretKey};
-use tonic_iroh_transport::{GrpcProtocolHandler, IrohConnect, IrohContext};
+use tonic_iroh_transport::{IrohConnect, IrohContext, RpcServer};
 
 #[derive(Parser)]
 #[clap(name = "p2p-chat")]
@@ -455,33 +455,20 @@ async fn main() -> Result<()> {
     let chat_service = ChatServiceImpl::new(chat_state.clone());
     let node_service = NodeServiceImpl::new(chat_state);
 
-    let (chat_handler, chat_incoming, chat_alpn) =
-        GrpcProtocolHandler::for_service::<P2pChatServiceServer<ChatServiceImpl>>();
-    let (node_handler, node_incoming, node_alpn) =
-        GrpcProtocolHandler::for_service::<NodeServiceServer<NodeServiceImpl>>();
+    // Start RPC server hosting both services
+    let rpc_guard = RpcServer::new(endpoint.clone())
+        .add_service(P2pChatServiceServer::new(chat_service))
+        .add_service(NodeServiceServer::new(node_service))
+        .serve()
+        .await?;
 
     let endpoint_for_client = endpoint.clone();
 
     // Log the protocols before moving
     println!("P2P Chat Node started successfully");
     info!("Available protocols:");
-    info!("  - Chat Service: {}", String::from_utf8_lossy(&chat_alpn));
-    info!("  - Node Service: {}", String::from_utf8_lossy(&node_alpn));
-
-    let router = iroh::protocol::Router::builder(endpoint)
-        .accept(chat_alpn, chat_handler)
-        .accept(node_alpn, node_handler)
-        .spawn();
-
-    // Spawn chat server
-    let chat_server = Server::builder()
-        .add_service(P2pChatServiceServer::new(chat_service))
-        .serve_with_incoming(chat_incoming);
-
-    // Spawn node server
-    let node_server = Server::builder()
-        .add_service(NodeServiceServer::new(node_service))
-        .serve_with_incoming(node_incoming);
+    info!("  - Chat Service: /p2p_chat.P2pChatService/1.0");
+    info!("  - Node Service: /p2p_chat.NodeService/1.0");
 
     if let Some(target_node_id) = args.connect_to {
         let endpoint_clone = endpoint_for_client.clone();
@@ -503,16 +490,6 @@ async fn main() -> Result<()> {
     }
 
     tokio::select! {
-        result = chat_server => {
-            if let Err(e) = result {
-                error!("Chat server error: {}", e);
-            }
-        }
-        result = node_server => {
-            if let Err(e) = result {
-                error!("Node server error: {}", e);
-            }
-        }
         _ = tokio::signal::ctrl_c() => {
             info!("Shutting down node...");
         }
@@ -521,7 +498,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    router.shutdown().await?;
+    rpc_guard.shutdown().await?;
 
     Ok(())
 }

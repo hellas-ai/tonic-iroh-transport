@@ -13,17 +13,31 @@ categories = ["network-programming", "api-bindings"]
 allow-branch = ["master"]
 pre-release-hook = ["make", "all"]
 
+[features]
+default = []
+gossip = ["dep:iroh-gossip", "dep:blake3", "dep:async-trait", "dep:prost"]
+
 [dependencies]
 iroh = { version = "0.95" }
-tonic = { version = "0.14", features = ["transport", "channel", "server"], default-features = false }
+tonic = { version = "0.14", features = ["transport", "channel", "router"], default-features = false }
 tokio = { version = "1.48", default-features = false }
 tokio-stream = { version = "0.1", default-features = false }
 http = { version = "1.4", default-features = false }
 hyper-util = { version = "0.1", default-features = false }
+hyper = { version = "1", default-features = false, features = ["http1", "http2", "client", "server"] }
 tower = { version = "0.4", features = ["util"], default-features = false }
 futures-util = { version = "0.3", default-features = false }
 thiserror = { version = "2.0", default-features = false }
 tracing = { version = "0.1", default-features = false }
+bytes = { version = "1.8", default-features = false }
+http-body = { version = "1.0", default-features = false }
+axum = { version = "0.8", default-features = false }
+
+# Gossip feature dependencies
+iroh-gossip = { version = "0.95", optional = true, default-features = false, features = ["net"] }
+blake3 = { version = "1.8", optional = true }
+async-trait = { version = "0.1", optional = true }
+prost = { version = "0.14", optional = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

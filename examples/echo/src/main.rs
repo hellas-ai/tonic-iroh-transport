@@ -4,10 +4,9 @@ use pb::echo::{
     echo_server::{Echo, EchoServer},
     EchoRequest, EchoResponse,
 };
-use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 use tonic_iroh_transport::iroh::{self, EndpointAddr};
-use tonic_iroh_transport::{GrpcProtocolHandler, IrohConnect, IrohContext};
+use tonic_iroh_transport::{IrohConnect, IrohContext, RpcServer};
 use tracing::info;
 
 // Generated protobuf code
@@ -50,27 +49,11 @@ async fn main() -> Result<()> {
         server_endpoint.bound_sockets()
     );
 
-    // Set up echo service
-    let (handler, incoming, alpn) = GrpcProtocolHandler::for_service::<EchoServer<EchoService>>();
-
-    info!(
-        "Echo server started on protocol: {}",
-        String::from_utf8_lossy(&alpn)
-    );
-
-    let _router = iroh::protocol::Router::builder(server_endpoint.clone())
-        .accept(alpn, handler)
-        .spawn();
-
-    // Spawn server in background
-    let server_handle = tokio::spawn(async move {
-        let server = Server::builder()
-            .add_service(EchoServer::new(EchoService))
-            .serve_with_incoming(incoming);
-        if let Err(e) = server.await {
-            eprintln!("Server error: {e}");
-        }
-    });
+    // Start the RPC server with the echo service; this spawns the router and tonic server internally.
+    let rpc_guard = RpcServer::new(server_endpoint.clone())
+        .add_service(EchoServer::new(EchoService))
+        .serve()
+        .await?;
 
     // Give the server a moment to start up
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -119,7 +102,7 @@ async fn main() -> Result<()> {
     info!("Echo demo completed successfully!");
 
     // Shutdown
-    server_handle.abort();
+    rpc_guard.shutdown().await?;
 
     Ok(())
 }
