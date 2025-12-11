@@ -6,7 +6,7 @@ use tonic_iroh_transport::iroh::{
     protocol::{AcceptError, ProtocolHandler, Router},
     Endpoint, EndpointAddr, EndpointId, TransportAddr,
 };
-use tonic_iroh_transport::{GrpcProtocolHandler, IrohConnect, IrohStream};
+use tonic_iroh_transport::{IrohConnect, IrohStream, RpcServer};
 
 /// Create a local-only endpoint with relays and discovery disabled for testing.
 async fn local_endpoint() -> Endpoint {
@@ -35,16 +35,6 @@ fn to_localhost_addrs(addrs: Vec<SocketAddr>) -> impl Iterator<Item = TransportA
         };
         TransportAddr::Ip(local_addr)
     })
-}
-
-struct TestService;
-impl tonic::server::NamedService for TestService {
-    const NAME: &'static str = "test.Service";
-}
-
-struct AltService;
-impl tonic::server::NamedService for AltService {
-    const NAME: &'static str = "alt.Service";
 }
 
 #[tokio::test]
@@ -80,117 +70,16 @@ async fn test_basic_iroh_connection() {
 }
 
 #[tokio::test]
-async fn test_grpc_protocol_handler() {
-    let (_handler, _incoming) = GrpcProtocolHandler::with_service_name("test.MockService");
-    let (_handler, _incoming) = GrpcProtocolHandler::new::<TestService>();
-    let (_handler, _incoming, alpn) = GrpcProtocolHandler::for_service::<TestService>();
-    assert_eq!(alpn, b"/test.Service/1.0");
-}
-
-#[tokio::test]
 async fn test_iroh_connect_trait() {
     // Test that the IrohConnect trait is implemented for NamedService types
     let endpoint = local_endpoint().await;
     let addr = EndpointAddr::new(endpoint.id());
     // Just verify the builder can be created (don't actually connect)
-    let _builder = TestService::connect(&endpoint, addr);
-}
-
-#[test_log::test(tokio::test)]
-async fn test_typed_client_connections() {
-    let server = local_endpoint().await;
-    let (handler, _incoming, alpn) = GrpcProtocolHandler::for_service::<TestService>();
-
-    let _router = Router::builder(server.clone())
-        .accept(alpn.clone(), handler)
-        .spawn();
-
-    let client_endpoint = local_endpoint().await;
-
-    let addr =
-        EndpointAddr::new(server.id()).with_addrs(to_localhost_addrs(server.bound_sockets()));
-
-    let result = timeout(
-        Duration::from_secs(2),
-        TestService::connect(&client_endpoint, addr),
-    )
-    .await;
-
-    assert!(result.is_ok() && result.unwrap().is_ok());
-    assert_eq!(alpn, b"/test.Service/1.0");
-}
-
-#[test_log::test(tokio::test)]
-async fn test_concurrent_connections() {
-    let server = local_endpoint().await;
-    let (handler, _incoming, alpn) = GrpcProtocolHandler::for_service::<TestService>();
-
-    let _router = Router::builder(server.clone())
-        .accept(alpn, handler)
-        .spawn();
-
-    let addr =
-        EndpointAddr::new(server.id()).with_addrs(to_localhost_addrs(server.bound_sockets()));
-
-    let tasks: Vec<_> = (0..5)
-        .map(|_| {
-            let addr = addr.clone();
-            tokio::spawn(async move {
-                let endpoint = local_endpoint().await;
-                timeout(
-                    Duration::from_secs(10),
-                    TestService::connect(&endpoint, addr),
-                )
-                .await
-                .unwrap()
-                .unwrap();
-            })
-        })
-        .collect();
-
-    for task in tasks {
-        task.await.unwrap();
+    struct DummyService;
+    impl tonic::server::NamedService for DummyService {
+        const NAME: &'static str = "test.Service";
     }
-}
-
-#[test_log::test(tokio::test)]
-async fn test_multiple_services() {
-    let server = local_endpoint().await;
-
-    let (handler1, _incoming1, alpn1) = GrpcProtocolHandler::for_service::<TestService>();
-    let (handler2, _incoming2, alpn2) = GrpcProtocolHandler::for_service::<AltService>();
-
-    let _router = Router::builder(server.clone())
-        .accept(alpn1.clone(), handler1)
-        .accept(alpn2.clone(), handler2)
-        .spawn();
-
-    let client_endpoint = local_endpoint().await;
-
-    let addr =
-        EndpointAddr::new(server.id()).with_addrs(to_localhost_addrs(server.bound_sockets()));
-
-    let channel1 = timeout(
-        Duration::from_secs(2),
-        TestService::connect(&client_endpoint, addr.clone()),
-    )
-    .await
-    .unwrap()
-    .unwrap();
-
-    let channel2 = timeout(
-        Duration::from_secs(2),
-        AltService::connect(&client_endpoint, addr),
-    )
-    .await
-    .unwrap()
-    .unwrap();
-
-    assert_eq!(alpn1, b"/test.Service/1.0");
-    assert_eq!(alpn2, b"/alt.Service/1.0");
-
-    drop(channel1);
-    drop(channel2);
+    let _builder = DummyService::connect(&endpoint, addr);
 }
 
 #[test_log::test(tokio::test)]
@@ -201,13 +90,56 @@ async fn test_connection_timeout_external() {
     let fake_node_id = EndpointId::from_bytes(&[0u8; 32]).unwrap();
     let addr = EndpointAddr::new(fake_node_id);
 
-    let result = timeout(
-        Duration::from_millis(500),
-        TestService::connect(&client_endpoint, addr),
-    )
+    let result = timeout(Duration::from_millis(500), {
+        struct DummyService;
+        impl tonic::server::NamedService for DummyService {
+            const NAME: &'static str = "test.Service";
+        }
+        DummyService::connect(&client_endpoint, addr)
+    })
     .await;
 
     assert!(result.is_err() || result.unwrap().is_err());
+}
+
+#[tokio::test]
+async fn test_rpc_server_lifecycle() {
+    use axum::body::Body as AxumBody;
+    use axum::response::Response;
+    use std::convert::Infallible;
+    use std::{future::Ready, task::Poll};
+    use tonic::body::Body;
+
+    #[derive(Clone)]
+    struct DummyRpc;
+    impl tonic::server::NamedService for DummyRpc {
+        const NAME: &'static str = "test.Service";
+    }
+    impl tower::Service<http::Request<Body>> for DummyRpc {
+        type Response = Response<AxumBody>;
+        type Error = Infallible;
+        type Future = Ready<Result<Self::Response, Self::Error>>;
+
+        fn poll_ready(
+            &mut self,
+            _cx: &mut std::task::Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _req: http::Request<Body>) -> Self::Future {
+            std::future::ready(Ok(Response::new(AxumBody::empty())))
+        }
+    }
+
+    let endpoint = local_endpoint().await;
+    let guard = RpcServer::new(endpoint.clone())
+        .add_service(DummyRpc)
+        .serve()
+        .await
+        .unwrap();
+
+    guard.shutdown().await.unwrap();
 }
 
 #[test_log::test(tokio::test)]
@@ -218,7 +150,12 @@ async fn test_connect_timeout_builtin() {
     let fake_node_id = EndpointId::from_bytes(&[0u8; 32]).unwrap();
     let addr = EndpointAddr::new(fake_node_id);
 
-    let result = TestService::connect(&client_endpoint, addr)
+    struct TimeoutService;
+    impl tonic::server::NamedService for TimeoutService {
+        const NAME: &'static str = "test.Service";
+    }
+
+    let result = TimeoutService::connect(&client_endpoint, addr)
         .connect_timeout(Duration::from_millis(100))
         .await;
 

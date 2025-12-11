@@ -44,54 +44,25 @@ impl Stream for IrohIncoming {
 /// This integrates with iroh's Router system and forwards connections to a tonic server.
 #[derive(Clone, Debug)]
 pub struct GrpcProtocolHandler {
-    sender: tokio::sync::mpsc::UnboundedSender<std::result::Result<IrohStream, std::io::Error>>,
+    pub(crate) sender:
+        tokio::sync::mpsc::UnboundedSender<std::result::Result<IrohStream, std::io::Error>>,
     service_name: String,
 }
 
 impl GrpcProtocolHandler {
-    /// Create a new GrpcProtocolHandler for a specific tonic service.
+    /// Create a GrpcProtocolHandler using an existing sender.
     ///
-    /// Returns the handler and an IrohIncoming stream that should be passed to
-    /// `Server::builder().add_service(...).serve_with_incoming(incoming)`.
-    pub fn new<T>() -> (Self, IrohIncoming)
-    where
-        T: tonic::server::NamedService,
-    {
-        Self::with_service_name(T::NAME)
-    }
-
-    /// Create a new GrpcProtocolHandler with a custom service name.
-    ///
-    /// Use this only if you need to override the service name for some reason.
-    /// Prefer `new()` which automatically derives the name from the tonic service.
-    pub fn with_service_name(service_name: impl Into<String>) -> (Self, IrohIncoming) {
-        let service_name = service_name.into();
-        let (incoming, sender) = IrohIncoming::new();
-
-        let handler = Self {
+    /// This is useful when multiple services should share the same
+    /// incoming stream. The caller owns the corresponding [`IrohIncoming`]
+    /// constructed elsewhere.
+    pub fn with_sender(
+        service_name: impl Into<String>,
+        sender: tokio::sync::mpsc::UnboundedSender<std::result::Result<IrohStream, std::io::Error>>,
+    ) -> Self {
+        Self {
             sender,
-            service_name,
-        };
-
-        (handler, incoming)
-    }
-
-    /// Create a new GrpcProtocolHandler for a specific tonic service with automatic ALPN.
-    ///
-    /// Returns the handler, incoming stream, and the ALPN protocol bytes.
-    /// This is a convenience method that combines protocol generation with handler creation.
-    pub fn for_service<T>() -> (Self, IrohIncoming, Vec<u8>)
-    where
-        T: tonic::server::NamedService,
-    {
-        let (handler, incoming) = Self::new::<T>();
-        let alpn = service_to_alpn::<T>();
-        (handler, incoming, alpn)
-    }
-
-    /// Get the service name for debugging.
-    pub fn service_name(&self) -> &str {
-        &self.service_name
+            service_name: service_name.into(),
+        }
     }
 }
 
@@ -184,11 +155,21 @@ pub fn service_to_alpn<T: tonic::server::NamedService>() -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_util::StreamExt;
+    use std::io;
 
-    #[test]
-    fn test_handler_creation() {
-        let (handler, _incoming) = GrpcProtocolHandler::with_service_name("test-service");
-        assert_eq!(handler.service_name(), "test-service");
+    #[tokio::test]
+    async fn test_with_sender_uses_existing_channel() {
+        let (mut incoming, sender) = IrohIncoming::new();
+        let _handler = GrpcProtocolHandler::with_sender("shared-service", sender.clone());
+
+        // Send an error through the shared sender and verify the incoming stream receives it.
+        sender
+            .send(Err(io::Error::new(io::ErrorKind::Other, "boom")))
+            .expect("send should succeed");
+
+        let next = incoming.next().await.expect("stream should yield");
+        assert!(next.is_err());
     }
 
     struct MockService;

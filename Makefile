@@ -6,17 +6,17 @@ all: fmt-all check-all lint-all test-all doc-check-all build examples
 # Build the main crate
 build:
 	@echo "Building main crate..."
-	cargo build
+	cargo build --features gossip
 
 # Build in release mode
 build-release:
 	@echo "Building main crate (release)..."
-	cargo build --release
+	cargo build --release --features gossip
 
 # Check code without building
 check:
 	@echo "Checking main crate..."
-	cargo check
+	cargo check --features gossip
 
 # Format code
 fmt:
@@ -51,32 +51,32 @@ fmt-check-all: fmt-check fmt-check-examples
 # Lint with clippy
 lint:
 	@echo "Linting main crate..."
-	cargo clippy -- -D warnings
+	cargo clippy --features gossip -- -D warnings
 
 # Generate documentation
 doc:
 	@echo "Generating docs for main crate..."
-	cargo doc --no-deps
+	cargo doc --no-deps --features gossip
 
 # Generate documentation with dependencies
 doc-full:
 	@echo "Generating docs for main crate with dependencies..."
-	cargo doc
+	cargo doc --features gossip
 
 # Check documentation builds without warnings
 doc-check:
 	@echo "Checking docs for main crate..."
-	cargo doc --no-deps --document-private-items
+	cargo doc --no-deps --document-private-items --features gossip
 
 # Run tests
 test:
 	@echo "Running tests..."
-	cargo test
+	cargo test --features gossip
 
 # Run tests with output
 test-verbose:
 	@echo "Running tests (verbose)..."
-	cargo test -- --nocapture
+	cargo test --features gossip -- --nocapture
 
 # Build examples
 examples:
