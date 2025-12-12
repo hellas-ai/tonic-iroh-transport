@@ -3,7 +3,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use tonic_iroh_transport::RpcServer;
+//! use tonic_iroh_transport::TransportBuilder;
 //! use http::Request;
 //! use tonic::body::Body;
 //! use std::convert::Infallible;
@@ -33,9 +33,9 @@
 //! let endpoint = iroh::Endpoint::builder().bind().await?;
 //!
 //! // Build and run the node
-//! let rpc = RpcServer::new(endpoint)
-//!     .add_service(Dummy)
-//!     .serve()
+//! let rpc = TransportBuilder::new(endpoint)
+//!     .add_rpc(Dummy)
+//!     .spawn()
 //!     .await?;
 //!
 //! // ... do work ...
@@ -52,9 +52,9 @@ pub use iroh;
 
 pub mod client;
 pub mod error;
-pub mod rpc;
 pub(crate) mod server;
 pub mod stream;
+pub mod transport;
 
 #[cfg(feature = "gossip")]
 pub mod gossip;
@@ -64,7 +64,7 @@ pub use client::{connect_alpn, ConnectBuilder, IrohConnect};
 pub use error::{Error, Result};
 pub use stream::{IrohContext, IrohStream};
 
-pub use rpc::{RpcGuard, RpcServer};
+pub use transport::{TransportBuilder, TransportGuard};
 
 #[cfg(feature = "gossip")]
 pub use gossip::*;

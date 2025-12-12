@@ -27,20 +27,11 @@ cargo run --bin client <NODE_ID>
 ## Code Structure
 
 ```rust
-// Protocol definition (proto/echo.proto)
-service Echo {
-  rpc Echo(EchoRequest) returns (EchoResponse);
-}
-
 // Server setup
 let endpoint = iroh::Endpoint::builder().bind().await?;
-let (handler, incoming, alpn) = GrpcProtocolHandler::for_service::<EchoServer<EchoService>>();
-let _router = iroh::protocol::Router::builder(endpoint)
-    .accept(alpn, handler)
-    .spawn();
-Server::builder()
-    .add_service(EchoServer::new(EchoService))
-    .serve_with_incoming(incoming)
+let _guard = TransportBuilder::new(endpoint)
+    .add_rpc(EchoServer::new(EchoService))
+    .spawn()
     .await?;
 
 // Client usage

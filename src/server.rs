@@ -1,11 +1,20 @@
 //! Simple server integration for tonic over iroh.
 
-use crate::stream::IrohStream;
+use crate::stream::{IrohContext, IrohStream};
 use futures_util::Stream;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, info};
+
+/// Generate ALPN protocol from tonic service name.
+///
+/// Converts "echo.Echo" -> "/echo.Echo/1.0"
+/// Converts "p2p_chat.P2PChatService" -> "/p2p_chat.P2PChatService/1.0"
+pub fn service_to_alpn<T: tonic::server::NamedService>() -> Vec<u8> {
+    let service_name = T::NAME;
+    format!("/{service_name}/1.0").into_bytes()
+}
 
 /// A simple incoming stream for serving tonic gRPC over iroh connections.
 ///
@@ -39,9 +48,7 @@ impl Stream for IrohIncoming {
     }
 }
 
-/// A simplified protocol handler that accepts iroh connections and converts them to gRPC streams.
-///
-/// This integrates with iroh's Router system and forwards connections to a tonic server.
+/// accepts iroh connections and convert them to gRPC streams
 #[derive(Clone, Debug)]
 pub struct GrpcProtocolHandler {
     pub(crate) sender:
@@ -51,10 +58,6 @@ pub struct GrpcProtocolHandler {
 
 impl GrpcProtocolHandler {
     /// Create a GrpcProtocolHandler using an existing sender.
-    ///
-    /// This is useful when multiple services should share the same
-    /// incoming stream. The caller owns the corresponding [`IrohIncoming`]
-    /// constructed elsewhere.
     pub fn with_sender(
         service_name: impl Into<String>,
         sender: tokio::sync::mpsc::UnboundedSender<std::result::Result<IrohStream, std::io::Error>>,
@@ -72,7 +75,7 @@ impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
         connection: iroh::endpoint::Connection,
     ) -> impl futures_util::Future<Output = Result<(), iroh::protocol::AcceptError>> + std::marker::Send
     {
-        // Spawn a task to handle this connection's streams (stream-per-call model)
+        // Spawn a task to handle this connection's stream
         let sender = self.sender.clone();
         let service_name = self.service_name.clone();
 
@@ -92,16 +95,17 @@ impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
                         Ok((send, recv)) => {
                             debug!("Accepted new stream for service '{}'", service_name_clone);
 
-                            // Create context for this stream
-                            let context = crate::stream::IrohContext {
-                                node_id: remote_node_id,
-                                connection: connection.clone(),
-                                established_at: std::time::Instant::now(),
-                                alpn: connection.alpn().to_vec(),
-                            };
-
                             // Create IrohStream for this gRPC call
-                            let stream = IrohStream::new(send, recv, context);
+                            let stream = IrohStream::new(
+                                send,
+                                recv,
+                                IrohContext {
+                                    node_id: remote_node_id,
+                                    connection: connection.clone(),
+                                    established_at: std::time::Instant::now(),
+                                    alpn: connection.alpn().to_vec(),
+                                },
+                            );
 
                             // Send to tonic's serve_with_incoming (don't wrap in TokioIo)
                             if let Err(e) = sender.send(Ok(stream)) {
@@ -141,15 +145,6 @@ impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
             // The incoming stream will end when the sender is dropped
         }
     }
-}
-
-/// Generate ALPN protocol from tonic service name.
-///
-/// Converts "echo.Echo" -> "/echo.Echo/1.0"
-/// Converts "p2p_chat.P2PChatService" -> "/p2p_chat.P2PChatService/1.0"
-pub fn service_to_alpn<T: tonic::server::NamedService>() -> Vec<u8> {
-    let service_name = T::NAME;
-    format!("/{service_name}/1.0").into_bytes()
 }
 
 #[cfg(test)]

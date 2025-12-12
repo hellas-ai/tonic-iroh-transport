@@ -133,7 +133,7 @@ The `IrohContext` extension provides details about the P2P connection.
 Set up the P2P server with iroh transport:
 
 ```rust
-use tonic_iroh_transport::GrpcProtocolHandler;
+use tonic_iroh_transport::TransportBuilder;
 use pb::echo::echo_server::EchoServer;
 
 #[tokio::main]
@@ -142,25 +142,17 @@ async fn main() -> Result<()> {
     let endpoint = iroh::Endpoint::builder().bind().await?;
     println!("Server Node ID: {}", endpoint.id());
 
-    // Set up gRPC service with P2P transport
-    let (handler, incoming, alpn) = GrpcProtocolHandler::for_service::<EchoServer<EchoService>>();
-    
-    // Register the protocol with iroh
-    let _router = iroh::protocol::Router::builder(endpoint)
-        .accept(alpn, handler)
-        .spawn();
-
-    // Start the gRPC server
-    Server::builder()
-        .add_service(EchoServer::new(EchoService))
-        .serve_with_incoming(incoming)
+    // Start transport with the Echo service
+    let _guard = TransportBuilder::new(endpoint)
+        .add_rpc(EchoServer::new(EchoService))
+        .spawn()
         .await?;
-        
+
     Ok(())
 }
 ```
 
-This creates an iroh endpoint, sets up the protocol handler, and starts the gRPC server.
+This creates an iroh endpoint, registers the service with the transport, and starts the gRPC server over iroh.
 
 ### 6. Client Usage
 

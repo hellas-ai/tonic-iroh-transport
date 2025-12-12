@@ -6,7 +6,7 @@ use tonic_iroh_transport::iroh::{
     protocol::{AcceptError, ProtocolHandler, Router},
     Endpoint, EndpointAddr, EndpointId, TransportAddr,
 };
-use tonic_iroh_transport::{IrohConnect, IrohStream, RpcServer};
+use tonic_iroh_transport::{IrohConnect, IrohStream, TransportBuilder};
 
 /// Create a local-only endpoint with relays and discovery disabled for testing.
 async fn local_endpoint() -> Endpoint {
@@ -133,9 +133,9 @@ async fn test_rpc_server_lifecycle() {
     }
 
     let endpoint = local_endpoint().await;
-    let guard = RpcServer::new(endpoint.clone())
-        .add_service(DummyRpc)
-        .serve()
+    let guard = TransportBuilder::new(endpoint.clone())
+        .add_rpc(DummyRpc)
+        .spawn()
         .await
         .unwrap();
 

@@ -20,7 +20,7 @@ gossip = ["dep:iroh-gossip", "dep:blake3", "dep:async-trait", "dep:prost"]
 [dependencies]
 iroh = { version = "0.95" }
 tonic = { version = "0.14", features = ["transport", "channel", "router"], default-features = false }
-tokio = { version = "1.48", default-features = false }
+tokio = { version = "1", default-features = false }
 tokio-stream = { version = "0.1", default-features = false }
 http = { version = "1.4", default-features = false }
 hyper-util = { version = "0.1", default-features = false }
