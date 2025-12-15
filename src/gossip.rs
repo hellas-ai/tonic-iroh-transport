@@ -42,7 +42,9 @@
 //! # }
 //! ```
 
+use std::future::Future;
 use std::marker::PhantomData;
+use std::pin::Pin;
 use std::time::Instant;
 
 use async_trait::async_trait;
@@ -59,7 +61,6 @@ pub use iroh_gossip::api::{
 };
 pub use iroh_gossip::net::Gossip as GossipInstance;
 use tokio::sync::broadcast;
-use tokio::task::JoinHandle;
 
 /// Derive a [`TopicId`] from a protobuf message type.
 ///
@@ -319,9 +320,11 @@ pub struct GossipConfig {
     pub bootstrap: Vec<iroh::PublicKey>,
 }
 
+type HandlerFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
 /// Type-erased handler spawner for gossip subscriptions.
 pub type HandlerSpawner =
-    Box<dyn FnOnce(Gossip, GossipConfig, broadcast::Receiver<()>) -> JoinHandle<()> + Send>;
+    Box<dyn FnOnce(Gossip, GossipConfig, broadcast::Receiver<()>) -> HandlerFuture + Send>;
 
 /// Create a handler spawner for a typed `GossipHandler`.
 pub fn handler<T, H>(handler: H) -> HandlerSpawner
@@ -331,10 +334,14 @@ where
 {
     Box::new(move |gossip, cfg, mut shutdown_rx| {
         let bootstrap = cfg.bootstrap.clone();
-        tokio::spawn(async move {
+        Box::pin(async move {
             let topic_id = topic_for::<T>();
             let bootstrap_len = bootstrap.len();
-            let handler_span = tracing::debug_span!("gossip_handler", topic = ?topic_id, bootstrap = bootstrap_len);
+            let handler_span = tracing::debug_span!(
+                "gossip_handler",
+                topic = ?topic_id,
+                bootstrap = bootstrap_len
+            );
 
             async move {
                 let topic = match gossip.subscribe(topic_id, bootstrap).await {
@@ -412,7 +419,7 @@ where
                 }
             }
             .instrument(handler_span)
-            .await
+            .await;
         })
     })
 }

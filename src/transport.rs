@@ -181,10 +181,42 @@ impl TransportBuilder {
             }
 
             driver.spawn(async move {
+                use std::time::Duration;
+
+                const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
+
                 loop {
+                    if tasks.is_empty() {
+                        break;
+                    }
+
                     tokio::select! {
                         _ = shutdown_rx.recv() => {
-                            tasks.shutdown().await;
+                            let grace = tokio::time::sleep(SHUTDOWN_GRACE);
+                            tokio::pin!(grace);
+
+                            while !tasks.is_empty() {
+                                tokio::select! {
+                                    _ = &mut grace => break,
+                                    Some(res) = tasks.join_next() => {
+                                        if let Err(e) = res {
+                                            tracing::warn!("gossip handler task failed: {e}");
+                                        }
+                                    }
+                                }
+                            }
+
+                            if !tasks.is_empty() {
+                                tasks.abort_all();
+                                while let Some(res) = tasks.join_next().await {
+                                    if let Err(e) = res {
+                                        if e.is_cancelled() {
+                                            continue;
+                                        }
+                                        tracing::warn!("gossip handler task failed: {e}");
+                                    }
+                                }
+                            }
                             break;
                         }
                         Some(res) = tasks.join_next() => {
@@ -192,7 +224,6 @@ impl TransportBuilder {
                                 tracing::warn!("gossip handler task failed: {e}");
                             }
                         }
-                        else => break,
                     }
                 }
             });
@@ -253,7 +284,14 @@ impl TransportGuard {
         #[cfg(feature = "gossip")]
         if let Some(gossip) = self.gossip.take() {
             if let Err(e) = gossip.shutdown().await {
-                tracing::warn!("gossip shutdown error: {e}");
+                match e {
+                    iroh_gossip::net::Error::ActorDropped { .. } => {
+                        tracing::debug!("gossip already shut down");
+                    }
+                    e => {
+                        tracing::warn!("gossip shutdown error: {e}");
+                    }
+                }
             }
         }
 
