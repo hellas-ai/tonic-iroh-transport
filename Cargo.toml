@@ -16,6 +16,7 @@ pre-release-hook = ["make", "all"]
 [features]
 default = []
 gossip = ["dep:iroh-gossip", "dep:blake3", "dep:async-trait", "dep:prost"]
+discovery = ["iroh/discovery-local-network", "iroh/discovery-pkarr-dht"]
 
 [dependencies]
 iroh = { version = "0.95" }
