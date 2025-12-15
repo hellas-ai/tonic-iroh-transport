@@ -5,8 +5,8 @@
 //! # Example
 //!
 //! ```no_run
-//! use tonic_iroh_transport::gossip::{GossipHandler, GossipRequest, GossipSession, GossipConfig, handler};
-//! use tonic_iroh_transport::iroh;
+//! use tonic_iroh_transport::gossip::{GossipHandler, GossipRequest};
+//! use tonic_iroh_transport::{iroh, TransportBuilder};
 //! use tonic::Status;
 //! use async_trait::async_trait;
 //! use bytes::Bytes;
@@ -33,17 +33,18 @@
 //!
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! let endpoint = iroh::Endpoint::builder().bind().await?;
-//! let (session, _gossip) = GossipSession::start(
-//!     endpoint,
-//!     GossipConfig::default(),
-//!     vec![handler::<MyMessage, _>(MyService, vec![])],
-//! ).await?;
-//! session.shutdown().await?;
+//! let guard = TransportBuilder::new(endpoint)
+//!     .add_gossip::<MyMessage, _>(MyService)
+//!     .spawn()
+//!     .await?;
+//! guard.shutdown().await?;
 //! # Ok(())
 //! # }
 //! ```
 
+use std::future::Future;
 use std::marker::PhantomData;
+use std::pin::Pin;
 use std::time::Instant;
 
 use async_trait::async_trait;
@@ -53,15 +54,13 @@ use iroh_gossip::proto::TopicId;
 use prost::bytes::Bytes;
 use prost::Name;
 use tonic::Status;
+use tracing::Instrument;
 
-use iroh::protocol::Router;
-use iroh::Endpoint;
 pub use iroh_gossip::api::{
     ApiError, Event, GossipSender as RawGossipSender, GossipTopic, Message,
 };
 pub use iroh_gossip::net::Gossip as GossipInstance;
 use tokio::sync::broadcast;
-use tokio::task::JoinHandle;
 
 /// Derive a [`TopicId`] from a protobuf message type.
 ///
@@ -112,7 +111,12 @@ impl Sender {
     /// Broadcast a typed message to all peers in the topic.
     pub async fn broadcast<T: prost::Message>(&self, msg: &T) -> std::result::Result<(), ApiError> {
         let bytes = msg.encode_to_vec();
-        self.inner.broadcast(Bytes::from(bytes)).await
+        let len = bytes.len();
+        let span = tracing::trace_span!("gossip_broadcast", bytes = len);
+        self.inner
+            .broadcast(Bytes::from(bytes))
+            .instrument(span)
+            .await
     }
 
     /// Broadcast a typed message only to direct neighbors.
@@ -121,7 +125,12 @@ impl Sender {
         msg: &T,
     ) -> std::result::Result<(), ApiError> {
         let bytes = msg.encode_to_vec();
-        self.inner.broadcast_neighbors(Bytes::from(bytes)).await
+        let len = bytes.len();
+        let span = tracing::trace_span!("gossip_broadcast_neighbors", bytes = len);
+        self.inner
+            .broadcast_neighbors(Bytes::from(bytes))
+            .instrument(span)
+            .await
     }
 }
 
@@ -250,9 +259,8 @@ where
                         Err(e) => Err(GossipError::Decode(e)),
                     });
                 }
-                Some(Ok(Event::NeighborUp(_) | Event::NeighborDown(_) | Event::Lagged)) => {
-                    // Skip non-message events
-                    continue;
+                Some(Ok(ev @ (Event::NeighborUp(_) | Event::NeighborDown(_) | Event::Lagged))) => {
+                    tracing::trace!(?ev, "gossip neighbor event");
                 }
                 Some(Err(e)) => return Some(Err(GossipError::Api(e))),
                 None => return None,
@@ -312,155 +320,108 @@ pub struct GossipConfig {
     pub bootstrap: Vec<iroh::PublicKey>,
 }
 
+type HandlerFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
 /// Type-erased handler spawner for gossip subscriptions.
 pub type HandlerSpawner =
-    Box<dyn FnOnce(Gossip, Vec<iroh::PublicKey>, broadcast::Receiver<()>) -> JoinHandle<()> + Send>;
+    Box<dyn FnOnce(Gossip, GossipConfig, broadcast::Receiver<()>) -> HandlerFuture + Send>;
 
 /// Create a handler spawner for a typed `GossipHandler`.
-pub fn handler<T, H>(handler: H, bootstrap: Vec<iroh::PublicKey>) -> HandlerSpawner
+pub fn handler<T, H>(handler: H) -> HandlerSpawner
 where
     T: prost::Message + Name + Send + Default + 'static,
     H: GossipHandler<T>,
 {
-    Box::new(move |gossip, _cfg_bootstrap, mut shutdown_rx| {
-        let bootstrap = bootstrap.clone();
-        tokio::spawn(async move {
+    Box::new(move |gossip, cfg, mut shutdown_rx| {
+        let bootstrap = cfg.bootstrap.clone();
+        Box::pin(async move {
             let topic_id = topic_for::<T>();
-            let topic = match gossip.subscribe(topic_id, bootstrap).await {
-                Ok(t) => t,
-                Err(e) => {
-                    tracing::error!("failed to subscribe to gossip topic: {e}");
-                    return;
-                }
-            };
+            let bootstrap_len = bootstrap.len();
+            let handler_span = tracing::debug_span!(
+                "gossip_handler",
+                topic = ?topic_id,
+                bootstrap = bootstrap_len
+            );
 
-            let (raw_sender, mut receiver) = topic.split();
-            let sender = Sender::new(raw_sender);
-
-            loop {
-                tokio::select! {
-                    _ = shutdown_rx.recv() => {
-                        tracing::debug!("gossip handler received shutdown signal");
-                        break;
+            async move {
+                let topic = match gossip.subscribe(topic_id, bootstrap).await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        tracing::error!("failed to subscribe to gossip topic: {e}");
+                        return;
                     }
-                    msg = receiver.next() => {
-                        match msg {
-                            Some(Ok(Event::Received(msg))) => {
-                                let ctx = GossipContext {
-                                    topic_id,
-                                    received_at: Instant::now(),
-                                    delivered_from: msg.delivered_from,
-                                };
+                };
 
-                                match T::decode(msg.content) {
-                                    Ok(decoded) => {
-                                        let request = GossipRequest::new(decoded, ctx, sender.clone());
-                                        if let Err(e) = handler.handle(request).await {
-                                            tracing::warn!("gossip handler error: {e}");
+                let (raw_sender, mut receiver) = topic.split();
+                let sender = Sender::new(raw_sender);
+
+                loop {
+                    tokio::select! {
+                        _ = shutdown_rx.recv() => {
+                            tracing::debug!("gossip handler received shutdown signal");
+                            break;
+                        }
+                        msg = receiver.next() => {
+                            match msg {
+                                Some(Ok(Event::Received(msg))) => {
+                                    let delivered_from = msg.delivered_from;
+                                    let content = msg.content;
+                                    let len = content.len();
+                                    let recv_span = tracing::trace_span!(
+                                        "gossip_recv",
+                                        topic = ?topic_id,
+                                        from = %delivered_from.fmt_short(),
+                                        len = len
+                                    );
+
+                                    async {
+                                        let ctx = GossipContext {
+                                            topic_id,
+                                            received_at: Instant::now(),
+                                            delivered_from,
+                                        };
+
+                                        match T::decode(content) {
+                                            Ok(decoded) => {
+                                                let request = GossipRequest::new(decoded, ctx, sender.clone());
+                                                if let Err(e) = handler.handle(request).await {
+                                                    tracing::warn!("gossip handler error: {e}");
+                                                }
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!("failed to decode gossip message: {e}");
+                                            }
                                         }
                                     }
-                                    Err(e) => {
-                                        tracing::warn!("failed to decode gossip message: {e}");
-                                    }
+                                    .instrument(recv_span)
+                                    .await;
                                 }
-                            }
-                            Some(Ok(Event::NeighborUp(peer))) => {
-                                tracing::debug!("gossip neighbor up: {}", peer.fmt_short());
-                            }
-                            Some(Ok(Event::NeighborDown(peer))) => {
-                                tracing::debug!("gossip neighbor down: {}", peer.fmt_short());
-                            }
-                            Some(Ok(Event::Lagged)) => {
-                                tracing::warn!("gossip subscription lagged");
-                            }
-                            Some(Err(e)) => {
-                                tracing::error!("gossip error: {e}");
-                                break;
-                            }
-                            None => {
-                                tracing::debug!("gossip subscription ended");
-                                break;
+                                Some(Ok(Event::NeighborUp(peer))) => {
+                                    tracing::debug!("gossip neighbor up: {}", peer.fmt_short());
+                                }
+                                Some(Ok(Event::NeighborDown(peer))) => {
+                                    tracing::debug!("gossip neighbor down: {}", peer.fmt_short());
+                                }
+                                Some(Ok(Event::Lagged)) => {
+                                    tracing::warn!("gossip subscription lagged");
+                                }
+                                Some(Err(e)) => {
+                                    tracing::error!("gossip error: {e}");
+                                    break;
+                                }
+                                None => {
+                                    tracing::debug!("gossip subscription ended");
+                                    break;
+                                }
                             }
                         }
                     }
                 }
             }
+            .instrument(handler_span)
+            .await;
         })
     })
-}
-
-/// Guard for a running gossip session.
-pub struct GossipSession {
-    router: Option<Router>,
-    gossip: Gossip,
-    shutdown_tx: broadcast::Sender<()>,
-    tasks: Vec<JoinHandle<()>>,
-    endpoint: Endpoint,
-}
-
-impl GossipSession {
-    /// Start a gossip session hosting the gossip protocol on the given endpoint.
-    ///
-    /// `handlers` are spawned immediately and cancelled on shutdown.
-    pub async fn start(
-        endpoint: Endpoint,
-        config: GossipConfig,
-        handlers: Vec<HandlerSpawner>,
-    ) -> crate::Result<(Self, Gossip)> {
-        let (shutdown_tx, _) = broadcast::channel(1);
-        let gossip = Gossip::builder().spawn(endpoint.clone());
-
-        let mut tasks = Vec::new();
-        for spawn in handlers.into_iter() {
-            tasks.push(spawn(
-                gossip.clone(),
-                config.bootstrap.clone(),
-                shutdown_tx.subscribe(),
-            ));
-        }
-
-        let router = iroh::protocol::Router::builder(endpoint.clone())
-            .accept(iroh_gossip::net::GOSSIP_ALPN, gossip.clone())
-            .spawn();
-
-        let session = GossipSession {
-            router: Some(router),
-            gossip: gossip.clone(),
-            shutdown_tx,
-            tasks,
-            endpoint,
-        };
-
-        Ok((session, gossip))
-    }
-
-    /// Access the gossip handle.
-    pub fn gossip(&self) -> &Gossip {
-        &self.gossip
-    }
-
-    /// Access the endpoint.
-    pub fn endpoint(&self) -> &Endpoint {
-        &self.endpoint
-    }
-
-    /// Graceful shutdown of handlers, gossip, and router.
-    pub async fn shutdown(mut self) -> crate::Result<()> {
-        let _ = self.shutdown_tx.send(());
-        for task in self.tasks.drain(..) {
-            let _ = task.await;
-        }
-
-        if let Err(e) = self.gossip.shutdown().await {
-            tracing::warn!("gossip shutdown error: {e}");
-        }
-
-        if let Some(router) = self.router.take() {
-            let _ = router.shutdown().await;
-        }
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]

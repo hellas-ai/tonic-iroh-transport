@@ -23,10 +23,8 @@ use pb::p2p_chat::{
 
 use tonic_iroh_transport::iroh::{self, EndpointAddr, EndpointId, SecretKey};
 use tonic_iroh_transport::{
-    gossip::{
-        handler as gossip_handler, GossipConfig, GossipHandler, GossipRequest, GossipSession,
-    },
-    IrohConnect, IrohContext, RpcServer,
+    gossip::{GossipHandler, GossipRequest},
+    IrohConnect, IrohContext, TransportBuilder,
 };
 
 #[derive(Parser)]
@@ -468,11 +466,13 @@ async fn main() -> Result<()> {
     let chat_service = ChatServiceImpl::new(chat_state.clone());
     let node_service = NodeServiceImpl::new(chat_state.clone());
 
-    // Start RPC server hosting both services
-    let rpc_guard = RpcServer::new(endpoint.clone())
-        .add_service(P2pChatServiceServer::new(chat_service))
-        .add_service(NodeServiceServer::new(node_service))
-        .serve()
+    let transport_guard = TransportBuilder::new(endpoint.clone())
+        .add_rpc(P2pChatServiceServer::new(chat_service))
+        .add_rpc(NodeServiceServer::new(node_service))
+        .add_gossip::<PublicMessage, _>(PublicChatHandler {
+            state: chat_state.clone(),
+        })
+        .spawn()
         .await?;
 
     let endpoint_for_client = endpoint.clone();
@@ -483,19 +483,6 @@ async fn main() -> Result<()> {
     info!("  - Chat Service: /p2p_chat.P2pChatService/1.0");
     info!("  - Node Service: /p2p_chat.NodeService/1.0");
     info!("  - Gossip channel: /pkg.ChatRoom/1.0");
-
-    // Start gossip session for public chat broadcast
-    let (gossip_session, _gossip) = GossipSession::start(
-        endpoint.clone(),
-        GossipConfig::default(),
-        vec![gossip_handler::<PublicMessage, _>(
-            PublicChatHandler {
-                state: chat_state.clone(),
-            },
-            vec![],
-        )],
-    )
-    .await?;
 
     if let Some(target_node_id) = args.connect_to {
         let endpoint_clone = endpoint_for_client.clone();
@@ -544,8 +531,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    gossip_session.shutdown().await?;
-    rpc_guard.shutdown().await?;
+    transport_guard.shutdown().await?;
 
     Ok(())
 }
