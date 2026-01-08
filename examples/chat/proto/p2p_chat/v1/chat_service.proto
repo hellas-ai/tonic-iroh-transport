@@ -17,24 +17,8 @@ service P2PChatService {
   rpc ChatStream(stream ChatStreamRequest) returns (stream ChatStreamResponse);
 }
 
-// Chat-specific messages
-message SendMessageRequest {
-  string recipient_id = 1;
-  string content = 2;
-  int64 timestamp = 3;
-}
-
-message SendMessageResponse {
-  bool success = 1;
-  string error = 2;
-  string message_id = 3;
-}
-
-message SubscribeMessagesRequest {
-  // Empty for now - could add filters in the future
-}
-
-message SubscribeMessagesResponse {
+// Core message type - defined once, used across RPCs
+message ChatMessage {
   string id = 1;
   string sender_id = 2;
   string recipient_id = 3;
@@ -50,6 +34,27 @@ enum MessageType {
   MESSAGE_TYPE_HEARTBEAT = 3;
 }
 
+// SendMessage RPC
+message SendMessageRequest {
+  string recipient_id = 1;
+  string content = 2;
+  int64 timestamp = 3;
+}
+
+message SendMessageResponse {
+  bool success = 1;
+  string error = 2;
+  string message_id = 3;
+}
+
+// SubscribeMessages RPC
+message SubscribeMessagesRequest {}
+
+message SubscribeMessagesResponse {
+  ChatMessage message = 1;
+}
+
+// GetHistory RPC
 message GetHistoryRequest {
   string peer_id = 1;
   int32 limit = 2;
@@ -57,24 +62,15 @@ message GetHistoryRequest {
 }
 
 message GetHistoryResponse {
-  repeated SubscribeMessagesResponse messages = 1;
+  repeated ChatMessage messages = 1;
   bool has_more = 2;
 }
 
+// ChatStream RPC
 message ChatStreamRequest {
-  string id = 1;
-  string sender_id = 2;
-  string recipient_id = 3;
-  string content = 4;
-  int64 timestamp = 5;
-  MessageType type = 6;
+  ChatMessage message = 1;
 }
 
 message ChatStreamResponse {
-  string id = 1;
-  string sender_id = 2;
-  string recipient_id = 3;
-  string content = 4;
-  int64 timestamp = 5;
-  MessageType type = 6;
+  ChatMessage message = 1;
 }

@@ -53,13 +53,13 @@ tonic-build = "0.13"
 
 ### 2. Protocol Definition
 
-Create `proto/echo.proto` to define your gRPC service:
+Create `proto/echo/v1/echo.proto` to define your gRPC service:
 
 ```protobuf
 syntax = "proto3";
-package echo;
+package echo.v1;
 
-service Echo {
+service EchoService {
   rpc Echo(EchoRequest) returns (EchoResponse);
 }
 
@@ -87,9 +87,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_transport(false)  // We provide our own transport
         .build_client(true)
         .build_server(true)
-        .compile_protos(&["proto/echo.proto"], &["proto"])?;
-    
-    println!("cargo:rerun-if-changed=proto/echo.proto");
+        .compile_protos(&["proto/echo/v1/echo.proto"], &["proto"])?;
+
+    println!("cargo:rerun-if-changed=proto/echo/v1/echo.proto");
     Ok(())
 }
 ```
@@ -101,23 +101,26 @@ This generates client and server code while disabling tonic's built-in transport
 Implement your gRPC service handler:
 
 ```rust
-use pb::echo::{echo_server::Echo, EchoRequest, EchoResponse};
+use pb::echo::v1::{
+    echo_service_server::EchoService,
+    EchoRequest, EchoResponse,
+};
 use tonic_iroh_transport::IrohContext;
 
 #[derive(Clone)]
-struct EchoService;
+struct EchoServiceImpl;
 
 #[tonic::async_trait]
-impl Echo for EchoService {
+impl EchoService for EchoServiceImpl {
     async fn echo(&self, request: Request<EchoRequest>) -> Result<Response<EchoResponse>, Status> {
         // Extract peer info from the P2P connection
         let context = request.extensions().get::<IrohContext>().cloned();
         let peer_id = context
             .map(|ctx| ctx.node_id.to_string())
             .unwrap_or_else(|| "unknown".to_string());
-        
+
         let req = request.into_inner();
-        
+
         Ok(Response::new(EchoResponse {
             message: req.message,
             peer_id,
@@ -134,7 +137,7 @@ Set up the P2P server with iroh transport:
 
 ```rust
 use tonic_iroh_transport::TransportBuilder;
-use pb::echo::echo_server::EchoServer;
+use pb::echo::v1::echo_service_server::EchoServiceServer;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -144,7 +147,7 @@ async fn main() -> Result<()> {
 
     // Start transport with the Echo service
     let _guard = TransportBuilder::new(endpoint)
-        .add_rpc(EchoServer::new(EchoService))
+        .add_rpc(EchoServiceServer::new(EchoServiceImpl))
         .spawn()
         .await?;
 
@@ -160,15 +163,19 @@ Connect to the P2P service and make calls:
 
 ```rust
 use tonic_iroh_transport::IrohConnect;
-use pb::echo::{echo_client::EchoClient, echo_server::EchoServer, EchoRequest};
+use pb::echo::v1::{
+    echo_service_client::EchoServiceClient,
+    echo_service_server::EchoServiceServer,
+    EchoRequest,
+};
 
 // Create client endpoint
 let client_endpoint = iroh::Endpoint::builder().bind().await?;
 let server_addr = EndpointAddr::new(server_node_id);
 
 // Connect using the IrohConnect trait
-let channel = EchoServer::<EchoService>::connect(&client_endpoint, server_addr).await?;
-let mut client = EchoClient::new(channel);
+let channel = EchoServiceServer::<EchoServiceImpl>::connect(&client_endpoint, server_addr).await?;
+let mut client = EchoServiceClient::new(channel);
 
 // Make RPC calls
 let request = Request::new(EchoRequest {
@@ -187,7 +194,7 @@ You can also configure connection options:
 use std::time::Duration;
 
 // With connection timeout
-let channel = EchoServer::<EchoService>::connect(&client_endpoint, server_addr)
+let channel = EchoServiceServer::<EchoServiceImpl>::connect(&client_endpoint, server_addr)
     .connect_timeout(Duration::from_secs(10))
     .await?;
 ```

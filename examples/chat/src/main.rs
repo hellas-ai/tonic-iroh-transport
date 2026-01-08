@@ -113,8 +113,8 @@ enum Command {
 
 #[derive(Clone)]
 struct ChatState {
-    messages: Arc<RwLock<Vec<SubscribeMessagesResponse>>>,
-    subscribers: Arc<RwLock<HashMap<String, mpsc::Sender<SubscribeMessagesResponse>>>>,
+    messages: Arc<RwLock<Vec<ChatMessage>>>,
+    subscribers: Arc<RwLock<HashMap<String, mpsc::Sender<ChatMessage>>>>,
     node_id: String,
     request_count: Arc<std::sync::atomic::AtomicU64>,
     max_requests: Option<u64>,
@@ -126,10 +126,10 @@ impl std::fmt::Debug for ChatState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ChatState")
             .field("node_id", &self.node_id)
-            .field("messages", &"<RwLock<Vec<SubscribeMessagesResponse>>>")
+            .field("messages", &"<RwLock<Vec<ChatMessage>>>")
             .field(
                 "subscribers",
-                &"<RwLock<HashMap<String, mpsc::Sender<SubscribeMessagesResponse>>>>",
+                &"<RwLock<HashMap<String, mpsc::Sender<ChatMessage>>>>",
             )
             .finish()
     }
@@ -158,7 +158,7 @@ impl ChatState {
         (state, shutdown_rx, pub_rx)
     }
 
-    async fn add_message(&self, message: SubscribeMessagesResponse) {
+    async fn add_message(&self, message: ChatMessage) {
         self.messages.write().await.push(message.clone());
 
         let subscribers = self.subscribers.read().await;
@@ -169,7 +169,7 @@ impl ChatState {
         }
     }
 
-    async fn add_subscriber(&self, id: String, sender: mpsc::Sender<SubscribeMessagesResponse>) {
+    async fn add_subscriber(&self, id: String, sender: mpsc::Sender<ChatMessage>) {
         self.subscribers.write().await.insert(id, sender);
     }
 
@@ -212,8 +212,9 @@ impl P2pChatService for ChatServiceImpl {
             info!("======================");
         }
 
-        let message = SubscribeMessagesResponse {
-            id: uuid::new_v4().to_string(),
+        let message_id = uuid::new_v4().to_string();
+        let message = ChatMessage {
+            id: message_id.clone(),
             sender_id: self.state.node_id.clone(),
             recipient_id: req.recipient_id.clone(),
             content: req.content,
@@ -226,7 +227,7 @@ impl P2pChatService for ChatServiceImpl {
             message.sender_id, message.content
         );
 
-        self.state.add_message(message.clone()).await;
+        self.state.add_message(message).await;
 
         // Increment request counter and check if we should exit
         let count = self
@@ -244,7 +245,7 @@ impl P2pChatService for ChatServiceImpl {
         Ok(Response::new(SendMessageResponse {
             success: true,
             error: String::new(),
-            message_id: message.id,
+            message_id,
         }))
     }
 
@@ -275,7 +276,10 @@ impl P2pChatService for ChatServiceImpl {
         tokio::spawn(async move {
             let mut message_rx = rx;
             while let Some(message) = message_rx.recv().await {
-                if result_tx.send(Ok(message)).await.is_err() {
+                let response = SubscribeMessagesResponse {
+                    message: Some(message),
+                };
+                if result_tx.send(Ok(response)).await.is_err() {
                     break;
                 }
             }
@@ -296,7 +300,7 @@ impl P2pChatService for ChatServiceImpl {
         let req = request.into_inner();
         let messages = self.state.messages.read().await;
 
-        let filtered_messages: Vec<SubscribeMessagesResponse> = messages
+        let filtered_messages: Vec<ChatMessage> = messages
             .iter()
             .filter(|msg| {
                 (msg.sender_id == req.peer_id || msg.recipient_id == req.peer_id)
@@ -327,27 +331,28 @@ impl P2pChatService for ChatServiceImpl {
         tokio::spawn(async move {
             while let Some(result) = stream.message().await.transpose() {
                 match result {
-                    Ok(message) => {
+                    Ok(request) => {
+                        let Some(message) = request.message else {
+                            warn!("Received chat stream request without message");
+                            continue;
+                        };
+
                         info!("Received chat stream message: {}", message.content);
 
-                        // Convert ChatStreamRequest to SubscribeMessagesResponse for storage
-                        let stored_message = SubscribeMessagesResponse {
-                            id: message.id.clone(),
-                            sender_id: message.sender_id.clone(),
-                            recipient_id: message.recipient_id.clone(),
-                            content: message.content.clone(),
-                            timestamp: message.timestamp,
-                            r#type: message.r#type,
-                        };
-                        state.add_message(stored_message).await;
+                        // Store the message directly
+                        state.add_message(message.clone()).await;
 
-                        let response = ChatStreamResponse {
+                        let response_message = ChatMessage {
                             id: uuid::new_v4().to_string(),
                             sender_id: state.node_id.clone(),
                             recipient_id: message.sender_id,
                             content: format!("Echo: {}", message.content),
                             timestamp: chrono::Utc::now().timestamp(),
                             r#type: MessageType::Text.into(),
+                        };
+
+                        let response = ChatStreamResponse {
+                            message: Some(response_message),
                         };
 
                         if tx.send(Ok(response)).await.is_err() {
@@ -533,7 +538,7 @@ async fn main() -> Result<()> {
             }
             Some(msg) = gossip_rx.recv() => {
                 info!("Received public gossip message: {}", msg.content);
-                chat_state.add_message(SubscribeMessagesResponse {
+                chat_state.add_message(ChatMessage {
                     id: uuid::new_v4().to_string(),
                     sender_id: msg.sender_id.clone(),
                     recipient_id: "public".into(),
@@ -705,13 +710,15 @@ async fn subscribe_messages(client: &mut P2pChatServiceClient<Channel>) -> Resul
 
     while let Some(message_result) = stream.next().await {
         match message_result {
-            Ok(message) => {
-                info!(
-                    "[{}] {}: {}",
-                    format_timestamp(message.timestamp),
-                    message.sender_id,
-                    message.content
-                );
+            Ok(response) => {
+                if let Some(message) = response.message {
+                    info!(
+                        "[{}] {}: {}",
+                        format_timestamp(message.timestamp),
+                        message.sender_id,
+                        message.content
+                    );
+                }
             }
             Err(e) => {
                 error!("Error receiving message: {}", e);
@@ -773,8 +780,10 @@ async fn interactive_chat(
     let response_handle = tokio::spawn(async move {
         while let Some(message_result) = response_stream.next().await {
             match message_result {
-                Ok(message) => {
-                    println!("< {}", message.content);
+                Ok(response) => {
+                    if let Some(message) = response.message {
+                        println!("< {}", message.content);
+                    }
                 }
                 Err(e) => {
                     error!("Error receiving message: {}", e);
@@ -802,7 +811,7 @@ async fn interactive_chat(
         }
 
         if !content.is_empty() {
-            let message = ChatStreamRequest {
+            let chat_message = ChatMessage {
                 id: uuid::new_v4().to_string(),
                 sender_id: local_node_id.to_string(),
                 recipient_id: String::new(),
@@ -810,8 +819,11 @@ async fn interactive_chat(
                 timestamp: chrono::Utc::now().timestamp(),
                 r#type: MessageType::Text.into(),
             };
+            let request = ChatStreamRequest {
+                message: Some(chat_message),
+            };
 
-            if tx.send(message).await.is_err() {
+            if tx.send(request).await.is_err() {
                 error!("Failed to send message");
                 break;
             }

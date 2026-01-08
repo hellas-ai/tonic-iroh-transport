@@ -54,18 +54,14 @@ cargo run --bin client -- \
 ## Architecture
 
 ```rust
-// Server: Multiple services with separate handlers
+// Server: Multiple services registered with TransportBuilder
 let endpoint = iroh::Endpoint::builder().bind().await?;
 
-let (chat_handler, chat_incoming, chat_alpn) =
-    GrpcProtocolHandler::for_service::<P2pChatServiceServer<ChatServiceImpl>>();
-let (node_handler, node_incoming, node_alpn) =
-    GrpcProtocolHandler::for_service::<NodeServiceServer<NodeServiceImpl>>();
-
-let _router = iroh::protocol::Router::builder(endpoint)
-    .accept(chat_alpn, chat_handler)
-    .accept(node_alpn, node_handler)
-    .spawn();
+let _guard = TransportBuilder::new(endpoint.clone())
+    .add_rpc(P2pChatServiceServer::new(chat_service))
+    .add_rpc(NodeServiceServer::new(node_service))
+    .spawn()
+    .await?;
 
 // Client: Connect to each service using IrohConnect
 use tonic_iroh_transport::IrohConnect;

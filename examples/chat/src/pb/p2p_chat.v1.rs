@@ -604,7 +604,23 @@ pub mod node_service_server {
         const NAME: &'static str = SERVICE_NAME;
     }
 }
-/// Chat-specific messages
+/// Core message type - defined once, used across RPCs
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ChatMessage {
+    #[prost(string, tag = "1")]
+    pub id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub sender_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub recipient_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub content: ::prost::alloc::string::String,
+    #[prost(int64, tag = "5")]
+    pub timestamp: i64,
+    #[prost(enumeration = "MessageType", tag = "6")]
+    pub r#type: i32,
+}
+/// SendMessage RPC
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SendMessageRequest {
     #[prost(string, tag = "1")]
@@ -623,24 +639,15 @@ pub struct SendMessageResponse {
     #[prost(string, tag = "3")]
     pub message_id: ::prost::alloc::string::String,
 }
-/// Empty for now - could add filters in the future
+/// SubscribeMessages RPC
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SubscribeMessagesRequest {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SubscribeMessagesResponse {
-    #[prost(string, tag = "1")]
-    pub id: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub sender_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub recipient_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "4")]
-    pub content: ::prost::alloc::string::String,
-    #[prost(int64, tag = "5")]
-    pub timestamp: i64,
-    #[prost(enumeration = "MessageType", tag = "6")]
-    pub r#type: i32,
+    #[prost(message, optional, tag = "1")]
+    pub message: ::core::option::Option<ChatMessage>,
 }
+/// GetHistory RPC
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetHistoryRequest {
     #[prost(string, tag = "1")]
@@ -653,39 +660,20 @@ pub struct GetHistoryRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetHistoryResponse {
     #[prost(message, repeated, tag = "1")]
-    pub messages: ::prost::alloc::vec::Vec<SubscribeMessagesResponse>,
+    pub messages: ::prost::alloc::vec::Vec<ChatMessage>,
     #[prost(bool, tag = "2")]
     pub has_more: bool,
 }
+/// ChatStream RPC
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ChatStreamRequest {
-    #[prost(string, tag = "1")]
-    pub id: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub sender_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub recipient_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "4")]
-    pub content: ::prost::alloc::string::String,
-    #[prost(int64, tag = "5")]
-    pub timestamp: i64,
-    #[prost(enumeration = "MessageType", tag = "6")]
-    pub r#type: i32,
+    #[prost(message, optional, tag = "1")]
+    pub message: ::core::option::Option<ChatMessage>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ChatStreamResponse {
-    #[prost(string, tag = "1")]
-    pub id: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub sender_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub recipient_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "4")]
-    pub content: ::prost::alloc::string::String,
-    #[prost(int64, tag = "5")]
-    pub timestamp: i64,
-    #[prost(enumeration = "MessageType", tag = "6")]
-    pub r#type: i32,
+    #[prost(message, optional, tag = "1")]
+    pub message: ::core::option::Option<ChatMessage>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
