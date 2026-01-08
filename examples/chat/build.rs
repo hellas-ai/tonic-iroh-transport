@@ -2,7 +2,11 @@ use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proto_root = "proto";
-    let proto_files = vec!["common.proto", "node_service.proto", "chat_service.proto"];
+    let proto_files = vec![
+        "p2p_chat/v1/common.proto",
+        "p2p_chat/v1/node_service.proto",
+        "p2p_chat/v1/chat_service.proto",
+    ];
     let proto_paths: Vec<_> = proto_files
         .iter()
         .map(|file| Path::new(proto_root).join(file))

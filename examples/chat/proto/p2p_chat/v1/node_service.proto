@@ -1,26 +1,28 @@
 syntax = "proto3";
 
-package p2p_chat;
+package p2p_chat.v1;
 
-import "common.proto";
+import "p2p_chat/v1/common.proto";
 
 // Node discovery and health service
 service NodeService {
   // Get information about this node
-  rpc GetNodeInfo(Empty) returns (NodeInfo);
-  
+  rpc GetNodeInfo(GetNodeInfoRequest) returns (GetNodeInfoResponse);
+
   // Ping for connectivity testing
   rpc Ping(PingRequest) returns (PingResponse);
-  
+
   // List connected peers
-  rpc ListPeers(Empty) returns (ListPeersResponse);
-  
+  rpc ListPeers(ListPeersRequest) returns (ListPeersResponse);
+
   // Shutdown the node gracefully
-  rpc Shutdown(Empty) returns (Empty);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
 }
 
-// Node information and health messages
-message NodeInfo {
+// Request/response messages
+message GetNodeInfoRequest {}
+
+message GetNodeInfoResponse {
   string node_id = 1;
   repeated string addresses = 2;
   string version = 3;
@@ -39,6 +41,12 @@ message PingResponse {
   string echo_data = 3;
 }
 
+message ListPeersRequest {}
+
 message ListPeersResponse {
   repeated PeerInfo peers = 1;
 }
+
+message ShutdownRequest {}
+
+message ShutdownResponse {}

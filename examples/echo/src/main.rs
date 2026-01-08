@@ -1,7 +1,7 @@
 use anyhow::Result;
-use pb::echo::{
-    echo_client::EchoClient,
-    echo_server::{Echo, EchoServer},
+use pb::echo::v1::{
+    echo_service_client::EchoServiceClient,
+    echo_service_server::{EchoService, EchoServiceServer},
     EchoRequest, EchoResponse,
 };
 use tonic::{Request, Response, Status};
@@ -14,10 +14,10 @@ mod pb;
 
 // Simple echo service implementation
 #[derive(Clone)]
-struct EchoService;
+struct EchoServiceImpl;
 
 #[tonic::async_trait]
-impl Echo for EchoService {
+impl EchoService for EchoServiceImpl {
     async fn echo(&self, request: Request<EchoRequest>) -> Result<Response<EchoResponse>, Status> {
         // Extract peer info from connection
         let context = request.extensions().get::<IrohContext>().cloned();
@@ -51,7 +51,7 @@ async fn main() -> Result<()> {
 
     // Start the RPC server with the echo service using the unified transport.
     let rpc_guard = TransportBuilder::new(server_endpoint.clone())
-        .add_rpc(EchoServer::new(EchoService))
+        .add_rpc(EchoServiceServer::new(EchoServiceImpl))
         .spawn()
         .await?;
 
@@ -74,8 +74,9 @@ async fn main() -> Result<()> {
 
     info!("Connecting to server at: {:?}", server_addr);
 
-    let channel = EchoServer::<EchoService>::connect(&client_endpoint, server_addr).await?;
-    let mut client = EchoClient::new(channel);
+    let channel =
+        EchoServiceServer::<EchoServiceImpl>::connect(&client_endpoint, server_addr).await?;
+    let mut client = EchoServiceClient::new(channel);
 
     // Test a few echo calls
     let messages = vec![

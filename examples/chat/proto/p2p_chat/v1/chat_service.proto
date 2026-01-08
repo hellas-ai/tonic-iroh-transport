@@ -1,22 +1,20 @@
 syntax = "proto3";
 
-package p2p_chat;
-
-import "common.proto";
+package p2p_chat.v1;
 
 // P2P Chat Service - demonstrates both unary and streaming RPC patterns
 service P2PChatService {
   // Send a message to a peer
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
-  
+
   // Subscribe to incoming messages (server streaming)
-  rpc SubscribeMessages(SubscribeRequest) returns (stream Message);
-  
+  rpc SubscribeMessages(SubscribeMessagesRequest) returns (stream SubscribeMessagesResponse);
+
   // Get chat history between peers
   rpc GetHistory(GetHistoryRequest) returns (GetHistoryResponse);
-  
+
   // Bi-directional chat stream
-  rpc ChatStream(stream Message) returns (stream Message);
+  rpc ChatStream(stream ChatStreamRequest) returns (stream ChatStreamResponse);
 }
 
 // Chat-specific messages
@@ -32,11 +30,11 @@ message SendMessageResponse {
   string message_id = 3;
 }
 
-message SubscribeRequest {
+message SubscribeMessagesRequest {
   // Empty for now - could add filters in the future
 }
 
-message Message {
+message SubscribeMessagesResponse {
   string id = 1;
   string sender_id = 2;
   string recipient_id = 3;
@@ -46,9 +44,10 @@ message Message {
 }
 
 enum MessageType {
-  TEXT = 0;
-  SYSTEM = 1;
-  HEARTBEAT = 2;
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+  MESSAGE_TYPE_TEXT = 1;
+  MESSAGE_TYPE_SYSTEM = 2;
+  MESSAGE_TYPE_HEARTBEAT = 3;
 }
 
 message GetHistoryRequest {
@@ -58,6 +57,24 @@ message GetHistoryRequest {
 }
 
 message GetHistoryResponse {
-  repeated Message messages = 1;
+  repeated SubscribeMessagesResponse messages = 1;
   bool has_more = 2;
+}
+
+message ChatStreamRequest {
+  string id = 1;
+  string sender_id = 2;
+  string recipient_id = 3;
+  string content = 4;
+  int64 timestamp = 5;
+  MessageType type = 6;
+}
+
+message ChatStreamResponse {
+  string id = 1;
+  string sender_id = 2;
+  string recipient_id = 3;
+  string content = 4;
+  int64 timestamp = 5;
+  MessageType type = 6;
 }
