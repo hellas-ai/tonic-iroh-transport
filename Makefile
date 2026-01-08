@@ -1,4 +1,4 @@
-.PHONY: all build check lint test examples clean install-tools help fmt fmt-examples fmt-all fmt-check fmt-check-examples fmt-check-all
+.PHONY: all build check lint test examples clean install-tools help fmt fmt-examples fmt-all fmt-check fmt-check-examples fmt-check-all lint-proto
 
 # Default target
 all: fmt-all check-all lint-all test-all doc-check-all build examples
@@ -113,6 +113,12 @@ lint-examples:
 	@echo "Linting echo example..."
 	cd examples/echo && cargo clippy -- -D warnings
 
+# Lint proto files with buf
+lint-proto:
+	@echo "Linting proto files..."
+	buf lint examples/chat/proto
+	buf lint examples/echo/proto
+
 # Generate docs for examples
 doc-examples:
 	@echo "Generating docs for chat example..."
@@ -130,8 +136,8 @@ doc-check-examples:
 # Full check including examples
 check-all: check check-examples
 
-# Full lint including examples
-lint-all: lint lint-examples
+# Full lint including examples and protos
+lint-all: lint lint-examples lint-proto
 
 # Full test including examples
 test-all: test test-examples
@@ -178,8 +184,9 @@ help:
 	@echo "  fmt-check-examples - Check if examples code is formatted"
 	@echo "  fmt-check-all    - Check if all code is formatted"
 	@echo "  lint             - Lint main crate with clippy"
-	@echo "  lint-all         - Lint main crate and examples"
+	@echo "  lint-all         - Lint main crate, examples, and protos"
 	@echo "  lint-examples    - Lint examples only"
+	@echo "  lint-proto       - Lint proto files with buf"
 	@echo "  test             - Run tests"
 	@echo "  test-verbose     - Run tests with output"
 	@echo "  test-all         - Run tests for main crate and examples"
