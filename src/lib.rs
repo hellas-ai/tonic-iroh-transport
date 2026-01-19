@@ -56,15 +56,13 @@ pub(crate) mod server;
 pub mod stream;
 pub mod transport;
 
-#[cfg(feature = "gossip")]
-pub mod gossip;
-
 // Re-export key types
 pub use client::{connect_alpn, ConnectBuilder, IrohConnect};
 pub use error::{Error, Result};
 pub use stream::{IrohContext, IrohStream};
 
-pub use transport::{TransportBuilder, TransportGuard};
+pub use transport::{
+    user_data_alpns, user_data_has_alpn, user_data_has_service, TransportBuilder, TransportGuard,
+};
 
-#[cfg(feature = "gossip")]
-pub use gossip::*;
+pub use iroh::discovery::UserData;

@@ -125,7 +125,7 @@ impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
                 }
             });
 
-            info!(
+            debug!(
                 "Successfully set up stream handler for service '{}' from peer: {}",
                 service_name, remote_node_id
             );
