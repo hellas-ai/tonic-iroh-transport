@@ -56,6 +56,9 @@ pub(crate) mod server;
 pub mod stream;
 pub mod transport;
 
+#[cfg(feature = "mainline-discovery")]
+pub mod mainline_discovery;
+
 // Re-export key types
 pub use client::{connect_alpn, ConnectBuilder, IrohConnect};
 pub use error::{Error, Result};

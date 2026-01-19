@@ -14,6 +14,9 @@ use tonic::transport::Server;
 use crate::error::Result;
 use crate::server::{service_to_alpn, GrpcProtocolHandler, IrohIncoming};
 
+#[cfg(feature = "mainline-discovery")]
+use crate::mainline_discovery::{MainlinePublisher, MainlinePublisherConfig};
+
 const ALPN_SEPARATOR: char = ',';
 
 fn encode_alpns(alpns: &[Vec<u8>]) -> UserData {
@@ -97,6 +100,8 @@ pub struct TransportBuilder {
     endpoint: Endpoint,
     services: Vec<Box<dyn AddService>>,
     alpns: Vec<Vec<u8>>,
+    #[cfg(feature = "mainline-discovery")]
+    mainline_config: Option<MainlinePublisherConfig>,
 }
 
 impl TransportBuilder {
@@ -106,7 +111,23 @@ impl TransportBuilder {
             endpoint,
             services: Vec::new(),
             alpns: Vec::new(),
+            #[cfg(feature = "mainline-discovery")]
+            mainline_config: None,
         }
+    }
+
+    /// Enable mainline DHT discovery with default configuration.
+    #[cfg(feature = "mainline-discovery")]
+    pub fn with_mainline_discovery(mut self) -> Self {
+        self.mainline_config = Some(MainlinePublisherConfig::default());
+        self
+    }
+
+    /// Enable mainline DHT discovery with custom configuration.
+    #[cfg(feature = "mainline-discovery")]
+    pub fn with_mainline_discovery_config(mut self, config: MainlinePublisherConfig) -> Self {
+        self.mainline_config = Some(config);
+        self
     }
 
     /// Add a tonic RPC service.
@@ -145,6 +166,19 @@ impl TransportBuilder {
             self.endpoint.set_user_data_for_discovery(Some(user_data));
         }
 
+        // Start mainline publisher if configured
+        #[cfg(feature = "mainline-discovery")]
+        let mainline_publisher = if let Some(config) = self.mainline_config {
+            let mut publisher = MainlinePublisher::from_endpoint(&self.endpoint, config);
+            for alpn in &self.alpns {
+                publisher.add_service(alpn.clone());
+            }
+            publisher.start(shutdown_tx.subscribe());
+            Some(publisher)
+        } else {
+            None
+        };
+
         let router = builder.spawn();
 
         let mut driver = JoinSet::new();
@@ -178,6 +212,8 @@ impl TransportBuilder {
             shutdown_tx,
             driver: driver_handle,
             router,
+            #[cfg(feature = "mainline-discovery")]
+            mainline_publisher,
         })
     }
 }
@@ -188,6 +224,8 @@ pub struct TransportGuard {
     shutdown_tx: broadcast::Sender<()>,
     driver: tokio::task::JoinHandle<()>,
     router: Router,
+    #[cfg(feature = "mainline-discovery")]
+    mainline_publisher: Option<MainlinePublisher>,
 }
 
 impl TransportGuard {
@@ -202,9 +240,16 @@ impl TransportGuard {
     }
 
     /// Graceful shutdown of tonic and router.
-    pub async fn shutdown(self) -> Result<()> {
+    #[allow(unused_mut)]
+    pub async fn shutdown(mut self) -> Result<()> {
         let _ = self.shutdown_tx.send(());
         let _ = self.driver.await;
+
+        // Stop mainline publisher if running
+        #[cfg(feature = "mainline-discovery")]
+        if let Some(ref mut publisher) = self.mainline_publisher {
+            publisher.stop().await;
+        }
 
         if let Err(e) = self.router.shutdown().await {
             tracing::warn!("router shutdown error: {e}");

@@ -29,11 +29,22 @@ pub enum Error {
     /// Connection error.
     #[error("Connection error: {0}")]
     Connection(String),
+
+    /// DHT discovery error.
+    #[cfg(feature = "mainline-discovery")]
+    #[error("DHT discovery error: {0}")]
+    DhtDiscovery(String),
 }
 
 impl Error {
     /// Create a connection error.
     pub fn connection<S: Into<String>>(msg: S) -> Self {
         Self::Connection(msg.into())
+    }
+
+    /// Create a DHT discovery error.
+    #[cfg(feature = "mainline-discovery")]
+    pub fn dht_discovery<S: Into<String>>(msg: S) -> Self {
+        Self::DhtDiscovery(msg.into())
     }
 }
