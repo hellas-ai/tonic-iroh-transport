@@ -26,6 +26,9 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y pkg-config libssl-dev protobuf-compiler
+
+    - name: Install buf
+      uses: bufbuild/buf-setup-action@v1
     
     - name: Cache cargo registry
       uses: actions/cache@v4

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # P2P Chat Benchmark Test
 
@@ -103,7 +103,7 @@ for i in {1..30}; do
         echo "OK"
         break
     fi
-    
+
     if ! kill -0 $SHUTDOWN_PID 2>/dev/null; then
         # Shutdown command completed, wait a bit more for receiver
         sleep 1
@@ -112,7 +112,7 @@ for i in {1..30}; do
             break
         fi
     fi
-    
+
     sleep 0.5
 done
 

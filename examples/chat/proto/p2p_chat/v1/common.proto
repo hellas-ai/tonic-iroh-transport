@@ -1,9 +1,6 @@
 syntax = "proto3";
 
-package p2p_chat;
-
-// Common message types shared across services
-message Empty {}
+package p2p_chat.v1;
 
 // Connection and peer information
 message PeerInfo {
@@ -14,7 +11,8 @@ message PeerInfo {
 }
 
 enum ConnectionType {
-  DIRECT = 0;
-  RELAY = 1;
-  UNKNOWN = 2;
+  CONNECTION_TYPE_UNSPECIFIED = 0;
+  CONNECTION_TYPE_DIRECT = 1;
+  CONNECTION_TYPE_RELAY = 2;
+  CONNECTION_TYPE_UNKNOWN = 3;
 }

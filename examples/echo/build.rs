@@ -2,7 +2,7 @@ use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proto_root = "proto";
-    let proto_files = vec!["echo.proto"];
+    let proto_files = vec!["echo/v1/echo.proto"];
     let proto_paths: Vec<_> = proto_files
         .iter()
         .map(|file| Path::new(proto_root).join(file))

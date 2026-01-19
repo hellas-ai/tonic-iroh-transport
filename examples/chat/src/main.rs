@@ -13,7 +13,7 @@ use tracing_subscriber::EnvFilter;
 
 mod pb;
 
-use pb::p2p_chat::{
+use pb::p2p_chat::v1::{
     node_service_client::NodeServiceClient,
     node_service_server::{NodeService, NodeServiceServer},
     p2p_chat_service_client::P2pChatServiceClient,
@@ -113,8 +113,8 @@ enum Command {
 
 #[derive(Clone)]
 struct ChatState {
-    messages: Arc<RwLock<Vec<Message>>>,
-    subscribers: Arc<RwLock<HashMap<String, mpsc::Sender<Message>>>>,
+    messages: Arc<RwLock<Vec<ChatMessage>>>,
+    subscribers: Arc<RwLock<HashMap<String, mpsc::Sender<ChatMessage>>>>,
     node_id: String,
     request_count: Arc<std::sync::atomic::AtomicU64>,
     max_requests: Option<u64>,
@@ -126,10 +126,10 @@ impl std::fmt::Debug for ChatState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ChatState")
             .field("node_id", &self.node_id)
-            .field("messages", &"<RwLock<Vec<Message>>>")
+            .field("messages", &"<RwLock<Vec<ChatMessage>>>")
             .field(
                 "subscribers",
-                &"<RwLock<HashMap<String, mpsc::Sender<Message>>>>",
+                &"<RwLock<HashMap<String, mpsc::Sender<ChatMessage>>>>",
             )
             .finish()
     }
@@ -158,7 +158,7 @@ impl ChatState {
         (state, shutdown_rx, pub_rx)
     }
 
-    async fn add_message(&self, message: Message) {
+    async fn add_message(&self, message: ChatMessage) {
         self.messages.write().await.push(message.clone());
 
         let subscribers = self.subscribers.read().await;
@@ -169,7 +169,7 @@ impl ChatState {
         }
     }
 
-    async fn add_subscriber(&self, id: String, sender: mpsc::Sender<Message>) {
+    async fn add_subscriber(&self, id: String, sender: mpsc::Sender<ChatMessage>) {
         self.subscribers.write().await.insert(id, sender);
     }
 
@@ -212,13 +212,14 @@ impl P2pChatService for ChatServiceImpl {
             info!("======================");
         }
 
-        let message = Message {
-            id: uuid::new_v4().to_string(),
+        let message_id = uuid::new_v4().to_string();
+        let message = ChatMessage {
+            id: message_id.clone(),
             sender_id: self.state.node_id.clone(),
             recipient_id: req.recipient_id.clone(),
             content: req.content,
             timestamp: req.timestamp,
-            r#type: MessageType::Text as i32,
+            r#type: MessageType::Text.into(),
         };
 
         info!(
@@ -226,7 +227,7 @@ impl P2pChatService for ChatServiceImpl {
             message.sender_id, message.content
         );
 
-        self.state.add_message(message.clone()).await;
+        self.state.add_message(message).await;
 
         // Increment request counter and check if we should exit
         let count = self
@@ -244,15 +245,15 @@ impl P2pChatService for ChatServiceImpl {
         Ok(Response::new(SendMessageResponse {
             success: true,
             error: String::new(),
-            message_id: message.id,
+            message_id,
         }))
     }
 
-    type SubscribeMessagesStream = ReceiverStream<Result<Message, Status>>;
+    type SubscribeMessagesStream = ReceiverStream<Result<SubscribeMessagesResponse, Status>>;
 
     async fn subscribe_messages(
         &self,
-        request: Request<SubscribeRequest>,
+        request: Request<SubscribeMessagesRequest>,
     ) -> Result<Response<Self::SubscribeMessagesStream>, Status> {
         // Extract connection information for subscriber
         let connect_info = request.extensions().get::<IrohContext>().cloned();
@@ -275,7 +276,10 @@ impl P2pChatService for ChatServiceImpl {
         tokio::spawn(async move {
             let mut message_rx = rx;
             while let Some(message) = message_rx.recv().await {
-                if result_tx.send(Ok(message)).await.is_err() {
+                let response = SubscribeMessagesResponse {
+                    message: Some(message),
+                };
+                if result_tx.send(Ok(response)).await.is_err() {
                     break;
                 }
             }
@@ -296,7 +300,7 @@ impl P2pChatService for ChatServiceImpl {
         let req = request.into_inner();
         let messages = self.state.messages.read().await;
 
-        let filtered_messages: Vec<Message> = messages
+        let filtered_messages: Vec<ChatMessage> = messages
             .iter()
             .filter(|msg| {
                 (msg.sender_id == req.peer_id || msg.recipient_id == req.peer_id)
@@ -314,11 +318,11 @@ impl P2pChatService for ChatServiceImpl {
         }))
     }
 
-    type ChatStreamStream = ReceiverStream<Result<Message, Status>>;
+    type ChatStreamStream = ReceiverStream<Result<ChatStreamResponse, Status>>;
 
     async fn chat_stream(
         &self,
-        request: Request<Streaming<Message>>,
+        request: Request<Streaming<ChatStreamRequest>>,
     ) -> Result<Response<Self::ChatStreamStream>, Status> {
         let mut stream = request.into_inner();
         let (tx, rx) = mpsc::channel(100);
@@ -327,18 +331,28 @@ impl P2pChatService for ChatServiceImpl {
         tokio::spawn(async move {
             while let Some(result) = stream.message().await.transpose() {
                 match result {
-                    Ok(message) => {
+                    Ok(request) => {
+                        let Some(message) = request.message else {
+                            warn!("Received chat stream request without message");
+                            continue;
+                        };
+
                         info!("Received chat stream message: {}", message.content);
 
+                        // Store the message directly
                         state.add_message(message.clone()).await;
 
-                        let response = Message {
+                        let response_message = ChatMessage {
                             id: uuid::new_v4().to_string(),
                             sender_id: state.node_id.clone(),
                             recipient_id: message.sender_id,
                             content: format!("Echo: {}", message.content),
                             timestamp: chrono::Utc::now().timestamp(),
-                            r#type: MessageType::Text as i32,
+                            r#type: MessageType::Text.into(),
+                        };
+
+                        let response = ChatStreamResponse {
+                            message: Some(response_message),
                         };
 
                         if tx.send(Ok(response)).await.is_err() {
@@ -375,8 +389,11 @@ impl NodeServiceImpl {
 
 #[tonic::async_trait]
 impl NodeService for NodeServiceImpl {
-    async fn get_node_info(&self, _request: Request<Empty>) -> Result<Response<NodeInfo>, Status> {
-        Ok(Response::new(NodeInfo {
+    async fn get_node_info(
+        &self,
+        _request: Request<GetNodeInfoRequest>,
+    ) -> Result<Response<GetNodeInfoResponse>, Status> {
+        Ok(Response::new(GetNodeInfoResponse {
             node_id: self.state.node_id.clone(),
             addresses: vec![],
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -398,15 +415,18 @@ impl NodeService for NodeServiceImpl {
 
     async fn list_peers(
         &self,
-        _request: Request<Empty>,
+        _request: Request<ListPeersRequest>,
     ) -> Result<Response<ListPeersResponse>, Status> {
         Ok(Response::new(ListPeersResponse { peers: vec![] }))
     }
 
-    async fn shutdown(&self, _request: Request<Empty>) -> Result<Response<Empty>, Status> {
+    async fn shutdown(
+        &self,
+        _request: Request<ShutdownRequest>,
+    ) -> Result<Response<ShutdownResponse>, Status> {
         println!("Shutdown requested via RPC, triggering graceful shutdown");
         let _ = self.state.shutdown_tx.send(());
-        Ok(Response::new(Empty {}))
+        Ok(Response::new(ShutdownResponse {}))
     }
 }
 
@@ -518,13 +538,13 @@ async fn main() -> Result<()> {
             }
             Some(msg) = gossip_rx.recv() => {
                 info!("Received public gossip message: {}", msg.content);
-                chat_state.add_message(Message {
+                chat_state.add_message(ChatMessage {
                     id: uuid::new_v4().to_string(),
                     sender_id: msg.sender_id.clone(),
                     recipient_id: "public".into(),
                     content: msg.content.clone(),
                     timestamp: chrono::Utc::now().timestamp(),
-                    r#type: MessageType::Text as i32,
+                    r#type: MessageType::Text.into(),
                 }).await;
             }
             else => break,
@@ -683,20 +703,22 @@ async fn send_message(
 async fn subscribe_messages(client: &mut P2pChatServiceClient<Channel>) -> Result<()> {
     info!("Subscribing to messages...");
 
-    let request = Request::new(SubscribeRequest {});
+    let request = Request::new(SubscribeMessagesRequest {});
     let mut stream = client.subscribe_messages(request).await?.into_inner();
 
     info!("Connected to message stream. Waiting for messages...");
 
     while let Some(message_result) = stream.next().await {
         match message_result {
-            Ok(message) => {
-                info!(
-                    "[{}] {}: {}",
-                    format_timestamp(message.timestamp),
-                    message.sender_id,
-                    message.content
-                );
+            Ok(response) => {
+                if let Some(message) = response.message {
+                    info!(
+                        "[{}] {}: {}",
+                        format_timestamp(message.timestamp),
+                        message.sender_id,
+                        message.content
+                    );
+                }
             }
             Err(e) => {
                 error!("Error receiving message: {}", e);
@@ -758,8 +780,10 @@ async fn interactive_chat(
     let response_handle = tokio::spawn(async move {
         while let Some(message_result) = response_stream.next().await {
             match message_result {
-                Ok(message) => {
-                    println!("< {}", message.content);
+                Ok(response) => {
+                    if let Some(message) = response.message {
+                        println!("< {}", message.content);
+                    }
                 }
                 Err(e) => {
                     error!("Error receiving message: {}", e);
@@ -787,16 +811,19 @@ async fn interactive_chat(
         }
 
         if !content.is_empty() {
-            let message = Message {
+            let chat_message = ChatMessage {
                 id: uuid::new_v4().to_string(),
                 sender_id: local_node_id.to_string(),
                 recipient_id: String::new(),
                 content,
                 timestamp: chrono::Utc::now().timestamp(),
-                r#type: MessageType::Text as i32,
+                r#type: MessageType::Text.into(),
+            };
+            let request = ChatStreamRequest {
+                message: Some(chat_message),
             };
 
-            if tx.send(message).await.is_err() {
+            if tx.send(request).await.is_err() {
                 error!("Failed to send message");
                 break;
             }
@@ -836,7 +863,7 @@ async fn ping_node(client: &mut NodeServiceClient<Channel>, data: Option<String>
 async fn get_node_info(client: &mut NodeServiceClient<Channel>) -> Result<()> {
     info!("Getting node information...");
 
-    let request = Request::new(Empty {});
+    let request = Request::new(GetNodeInfoRequest {});
     let response = client.get_node_info(request).await?;
     let response = response.into_inner();
 
@@ -856,7 +883,7 @@ async fn get_node_info(client: &mut NodeServiceClient<Channel>) -> Result<()> {
 async fn list_peers(client: &mut NodeServiceClient<Channel>) -> Result<()> {
     info!("Listing connected peers...");
 
-    let request = Request::new(Empty {});
+    let request = Request::new(ListPeersRequest {});
     let response = client.list_peers(request).await?;
     let response = response.into_inner();
 
@@ -882,7 +909,7 @@ async fn list_peers(client: &mut NodeServiceClient<Channel>) -> Result<()> {
 async fn shutdown_node(client: &mut NodeServiceClient<Channel>) -> Result<()> {
     println!("Requesting graceful shutdown of target node...");
 
-    let request = Request::new(Empty {});
+    let request = Request::new(ShutdownRequest {});
     let _response = client.shutdown(request).await?;
 
     println!("Shutdown request sent successfully");

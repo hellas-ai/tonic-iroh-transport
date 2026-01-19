@@ -1,5 +1,5 @@
 {
-  description = "Gate - P2P AI Compute Network";
+  description = "Rust library for using Iroh as Tonic transport";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -36,6 +36,7 @@
           cargo-unused-features
           cargo-edit
           protobuf
+          buf
         ];
 
         RUST_LOG = "info";
