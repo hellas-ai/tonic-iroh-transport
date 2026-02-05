@@ -56,8 +56,8 @@ pub(crate) mod server;
 pub mod stream;
 pub mod transport;
 
-#[cfg(feature = "mainline-discovery")]
-pub mod mainline_discovery;
+#[cfg(feature = "discovery")]
+pub mod swarm;
 
 // Re-export key types
 pub use client::{connect_alpn, ConnectBuilder, IrohConnect};

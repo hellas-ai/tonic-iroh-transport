@@ -15,8 +15,7 @@ pre-release-hook = ["make", "all"]
 
 [features]
 default = []
-discovery = ["iroh/discovery-local-network", "iroh/discovery-pkarr-dht"]
-mainline-discovery = ["discovery", "distributed-topic-tracker", "sha2", "async-stream", "serde", "postcard", "ed25519-dalek"]
+discovery = ["iroh/discovery-local-network", "iroh/discovery-pkarr-dht", "mainline", "sha2", "async-stream", "serde", "postcard"]
 
 [dependencies]
 iroh = { version = "0.95" }
@@ -35,12 +34,11 @@ http-body = { version = "1.0", default-features = false }
 axum = { version = "0.8", default-features = false }
 
 # Mainline DHT discovery dependencies (optional)
-distributed-topic-tracker = { version = "0.2", optional = true }
+mainline = { version = "6", optional = true }
 sha2 = { version = "0.10", optional = true, default-features = false }
 async-stream = { version = "0.3", optional = true }
 serde = { version = "1", optional = true, features = ["derive"] }
 postcard = { version = "1", optional = true, features = ["alloc"] }
-ed25519-dalek = { version = "3.0.0-pre", optional = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

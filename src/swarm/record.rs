@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Content stored in DHT records for service discovery.
 ///
-/// This is serialized using postcard and stored as the record content in the DHT.
+/// This is serialized using postcard and stored as the value in DHT mutable items.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceRecord {
     /// The iroh NodeId bytes (32 bytes).
@@ -57,6 +57,12 @@ mod tests {
 
         assert_eq!(record.node_id, node_id_bytes);
         assert_eq!(record.tags, vec!["region:us-east".to_string()]);
+
+        // Verify postcard roundtrip
+        let encoded = postcard::to_allocvec(&record).unwrap();
+        let decoded: ServiceRecord = postcard::from_bytes(&encoded).unwrap();
+        assert_eq!(decoded.node_id, record.node_id);
+        assert_eq!(decoded.tags, record.tags);
     }
 
     #[test]

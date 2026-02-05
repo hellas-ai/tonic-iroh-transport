@@ -31,7 +31,7 @@ pub enum Error {
     Connection(String),
 
     /// DHT discovery error.
-    #[cfg(feature = "mainline-discovery")]
+    #[cfg(feature = "discovery")]
     #[error("DHT discovery error: {0}")]
     DhtDiscovery(String),
 }
@@ -43,7 +43,7 @@ impl Error {
     }
 
     /// Create a DHT discovery error.
-    #[cfg(feature = "mainline-discovery")]
+    #[cfg(feature = "discovery")]
     pub fn dht_discovery<S: Into<String>>(msg: S) -> Self {
         Self::DhtDiscovery(msg.into())
     }

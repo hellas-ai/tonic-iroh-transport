@@ -14,8 +14,10 @@ use tonic::transport::Server;
 use crate::error::Result;
 use crate::server::{service_to_alpn, GrpcProtocolHandler, IrohIncoming};
 
-#[cfg(feature = "mainline-discovery")]
-use crate::mainline_discovery::{MainlinePublisher, MainlinePublisherConfig};
+#[cfg(feature = "discovery")]
+use crate::swarm::dht::publisher::DhtPublisher;
+#[cfg(feature = "discovery")]
+use crate::swarm::{DhtPublisherConfig, ServiceRegistry};
 
 const ALPN_SEPARATOR: char = ',';
 
@@ -100,8 +102,8 @@ pub struct TransportBuilder {
     endpoint: Endpoint,
     services: Vec<Box<dyn AddService>>,
     alpns: Vec<Vec<u8>>,
-    #[cfg(feature = "mainline-discovery")]
-    mainline_config: Option<MainlinePublisherConfig>,
+    #[cfg(feature = "discovery")]
+    registry: Option<(ServiceRegistry, DhtPublisherConfig)>,
 }
 
 impl TransportBuilder {
@@ -111,22 +113,22 @@ impl TransportBuilder {
             endpoint,
             services: Vec::new(),
             alpns: Vec::new(),
-            #[cfg(feature = "mainline-discovery")]
-            mainline_config: None,
+            #[cfg(feature = "discovery")]
+            registry: None,
         }
     }
 
-    /// Enable mainline DHT discovery with default configuration.
-    #[cfg(feature = "mainline-discovery")]
-    pub fn with_mainline_discovery(mut self) -> Self {
-        self.mainline_config = Some(MainlinePublisherConfig::default());
+    /// Enable DHT publishing using a shared service registry.
+    #[cfg(feature = "discovery")]
+    pub fn with_registry(mut self, registry: &ServiceRegistry) -> Self {
+        self.registry = Some((registry.clone(), DhtPublisherConfig::default()));
         self
     }
 
-    /// Enable mainline DHT discovery with custom configuration.
-    #[cfg(feature = "mainline-discovery")]
-    pub fn with_mainline_discovery_config(mut self, config: MainlinePublisherConfig) -> Self {
-        self.mainline_config = Some(config);
+    /// Enable DHT publishing with custom configuration.
+    #[cfg(feature = "discovery")]
+    pub fn with_registry_config(mut self, registry: &ServiceRegistry, config: DhtPublisherConfig) -> Self {
+        self.registry = Some((registry.clone(), config));
         self
     }
 
@@ -166,10 +168,10 @@ impl TransportBuilder {
             self.endpoint.set_user_data_for_discovery(Some(user_data));
         }
 
-        // Start mainline publisher if configured
-        #[cfg(feature = "mainline-discovery")]
-        let mainline_publisher = if let Some(config) = self.mainline_config {
-            let mut publisher = MainlinePublisher::from_endpoint(&self.endpoint, config);
+        // Start DHT publisher if a service registry was provided
+        #[cfg(feature = "discovery")]
+        let dht_publisher = if let Some((registry, config)) = self.registry {
+            let mut publisher = registry.create_publisher(config);
             for alpn in &self.alpns {
                 publisher.add_service(alpn.clone());
             }
@@ -212,8 +214,8 @@ impl TransportBuilder {
             shutdown_tx,
             driver: driver_handle,
             router,
-            #[cfg(feature = "mainline-discovery")]
-            mainline_publisher,
+            #[cfg(feature = "discovery")]
+            dht_publisher,
         })
     }
 }
@@ -224,8 +226,8 @@ pub struct TransportGuard {
     shutdown_tx: broadcast::Sender<()>,
     driver: tokio::task::JoinHandle<()>,
     router: Router,
-    #[cfg(feature = "mainline-discovery")]
-    mainline_publisher: Option<MainlinePublisher>,
+    #[cfg(feature = "discovery")]
+    dht_publisher: Option<DhtPublisher>,
 }
 
 impl TransportGuard {
@@ -245,9 +247,9 @@ impl TransportGuard {
         let _ = self.shutdown_tx.send(());
         let _ = self.driver.await;
 
-        // Stop mainline publisher if running
-        #[cfg(feature = "mainline-discovery")]
-        if let Some(ref mut publisher) = self.mainline_publisher {
+        // Stop DHT publisher if running
+        #[cfg(feature = "discovery")]
+        if let Some(ref mut publisher) = self.dht_publisher {
             publisher.stop().await;
         }
 

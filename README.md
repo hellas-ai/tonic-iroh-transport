@@ -199,6 +199,30 @@ let channel = EchoServiceServer::<EchoServiceImpl>::connect(&client_endpoint, se
     .await?;
 ```
 
+### 7. Swarm discovery and racing connects
+
+```rust
+use tonic_iroh_transport::swarm::{ServiceRegistry, ConnectOptions};
+use futures::StreamExt;
+use std::time::Duration;
+
+let registry = ServiceRegistry::new(&client_endpoint)?; // use with_mdns(...) to add mDNS
+
+// One-off peer lookup
+let peer_id = registry.discover::<EchoServiceServer<EchoServiceImpl>>()
+    .next()
+    .await
+    .ok_or(anyhow!("no peers found"))??;
+
+// Race multiple connection attempts and take the first channel
+let channel = registry
+    .find::<EchoServiceServer<EchoServiceImpl>>()
+    .per_attempt_timeout(Duration::from_secs(1))
+    .max_inflight(8)
+    .first()
+    .await?;
+```
+
 ## Examples
 
 - [`echo`](examples/echo/) - Simple echo service
