@@ -2,7 +2,7 @@
 
 use std::convert::Infallible;
 
-use iroh::discovery::UserData;
+use iroh::address_lookup::UserData;
 use iroh::protocol::{Router, RouterBuilder};
 use iroh::Endpoint;
 use tokio::sync::broadcast;
@@ -16,8 +16,6 @@ use crate::server::{service_to_alpn, GrpcProtocolHandler, IrohIncoming};
 
 #[cfg(feature = "discovery")]
 use crate::swarm::dht::publisher::DhtPublisher;
-#[cfg(feature = "discovery")]
-use crate::swarm::{DhtPublisherConfig, ServiceRegistry};
 
 const ALPN_SEPARATOR: char = ',';
 
@@ -103,7 +101,7 @@ pub struct TransportBuilder {
     services: Vec<Box<dyn AddService>>,
     alpns: Vec<Vec<u8>>,
     #[cfg(feature = "discovery")]
-    registry: Option<(ServiceRegistry, DhtPublisherConfig)>,
+    publisher: Option<DhtPublisher>,
 }
 
 impl TransportBuilder {
@@ -114,21 +112,14 @@ impl TransportBuilder {
             services: Vec::new(),
             alpns: Vec::new(),
             #[cfg(feature = "discovery")]
-            registry: None,
+            publisher: None,
         }
     }
 
-    /// Enable DHT publishing using a shared service registry.
+    /// Enable DHT publishing with a pre-configured publisher.
     #[cfg(feature = "discovery")]
-    pub fn with_registry(mut self, registry: &ServiceRegistry) -> Self {
-        self.registry = Some((registry.clone(), DhtPublisherConfig::default()));
-        self
-    }
-
-    /// Enable DHT publishing with custom configuration.
-    #[cfg(feature = "discovery")]
-    pub fn with_registry_config(mut self, registry: &ServiceRegistry, config: DhtPublisherConfig) -> Self {
-        self.registry = Some((registry.clone(), config));
+    pub fn with_publisher(mut self, publisher: DhtPublisher) -> Self {
+        self.publisher = Some(publisher);
         self
     }
 
@@ -165,13 +156,12 @@ impl TransportBuilder {
 
         if !self.alpns.is_empty() {
             let user_data = encode_alpns(&self.alpns);
-            self.endpoint.set_user_data_for_discovery(Some(user_data));
+            self.endpoint.set_user_data_for_address_lookup(Some(user_data));
         }
 
-        // Start DHT publisher if a service registry was provided
+        // Start DHT publisher if one was provided
         #[cfg(feature = "discovery")]
-        let dht_publisher = if let Some((registry, config)) = self.registry {
-            let mut publisher = registry.create_publisher(config);
+        let dht_publisher = if let Some(mut publisher) = self.publisher {
             for alpn in &self.alpns {
                 publisher.add_service(alpn.clone());
             }

@@ -26,13 +26,12 @@
 
 use std::future::{Future, IntoFuture};
 use std::pin::Pin;
-use std::sync::Arc;
 use std::time::Duration;
 
 use crate::{server::service_to_alpn, stream::IrohStream, Error, Result};
 use http::Uri;
 use hyper_util::rt::TokioIo;
-use iroh::endpoint::{ConnectingError, ConnectionError, TransportConfig};
+use iroh::endpoint::{ConnectingError, ConnectionError, QuicTransportConfig};
 use iroh::EndpointAddr;
 use tonic::transport::{Channel, Endpoint};
 use tower::service_fn;
@@ -133,7 +132,7 @@ pub struct ConnectBuilder {
     target: EndpointAddr,
     alpn: Vec<u8>,
     connect_timeout: Option<Duration>,
-    transport_config: Option<Arc<TransportConfig>>,
+    transport_config: Option<QuicTransportConfig>,
 }
 
 impl ConnectBuilder {
@@ -166,7 +165,7 @@ impl ConnectBuilder {
     ///
     /// **Warning**: Modifying transport config may affect the ability
     /// to establish and maintain direct connections. Test carefully.
-    pub fn transport_config(mut self, config: Arc<TransportConfig>) -> Self {
+    pub fn transport_config(mut self, config: QuicTransportConfig) -> Self {
         self.transport_config = Some(config);
         self
     }
@@ -218,7 +217,7 @@ async fn connect_impl(
     target: EndpointAddr,
     alpn: Vec<u8>,
     connect_timeout: Option<Duration>,
-    transport_config: Option<Arc<TransportConfig>>,
+    transport_config: Option<QuicTransportConfig>,
 ) -> Result<Channel> {
     let connect_future = connect_inner(endpoint, target, alpn, transport_config);
 
@@ -235,7 +234,7 @@ async fn connect_inner(
     endpoint: iroh::Endpoint,
     target: EndpointAddr,
     alpn: Vec<u8>,
-    transport_config: Option<Arc<TransportConfig>>,
+    transport_config: Option<QuicTransportConfig>,
 ) -> Result<Channel> {
     debug!("Connecting to peer: {}", target.id);
 

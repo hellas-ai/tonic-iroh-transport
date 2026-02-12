@@ -1,140 +1,80 @@
-//! Service registry for unified mDNS + DHT discovery.
-//!
-//! Owns a single shared mainline DHT instance used for both server-side
-//! publishing and client-side resolution.
+//! ServiceRegistry: owns pluggable discovery backends and builds locators.
 
-use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::Stream;
-use iroh::discovery::mdns::MdnsDiscovery;
-use iroh::{Endpoint, EndpointId};
-use mainline::Dht;
+use iroh::Endpoint;
 use tonic::server::NamedService;
 use tonic::transport::Channel;
 
-use super::connect::{self, ConnectOptions, Locator};
-use super::dht::publisher::{DhtPublisher, DhtPublisherConfig};
-use super::stream::DiscoveryOptions;
+use super::discovery::{Discovery, Peer};
+use super::engine::SwarmEngine;
+use super::locator::{Locator, LocatorConfig};
+use super::peers::PeerFeedSpec;
 use crate::server::service_to_alpn;
 
-/// Unified service registry for mDNS + DHT discovery.
-///
-/// Owns a single shared mainline DHT instance. On the server side, pass to
-/// [`TransportBuilder::with_registry()`](crate::TransportBuilder::with_registry)
-/// to enable DHT publishing. On the client side, call
-/// [`discover()`](ServiceRegistry::discover) to get a stream of peers.
-///
-/// # Server
-///
-/// ```ignore
-/// let registry = ServiceRegistry::new(&endpoint)?;
-/// let guard = TransportBuilder::new(endpoint)
-///     .with_registry(&registry)
-///     .add_rpc(MyServiceServer::new(svc))
-///     .spawn()
-///     .await?;
-/// ```
-///
-/// # Client
-///
-/// ```ignore
-/// let registry = ServiceRegistry::new(&endpoint)?;
-/// let mut stream = Box::pin(registry.discover::<MyServiceServer<()>>());
-/// let peer = stream.next().await;
-/// ```
+/// Unified registry for pluggable peer discovery backends.
 #[derive(Clone)]
 pub struct ServiceRegistry {
     endpoint: Endpoint,
-    dht: Arc<Dht>,
-    mdns: Option<Arc<MdnsDiscovery>>,
+    backends: Vec<Arc<dyn Discovery>>,
 }
 
 impl ServiceRegistry {
-    /// Create a new registry with a shared DHT client.
-    pub fn new(endpoint: &Endpoint) -> std::io::Result<Self> {
-        let dht =
-            Arc::new(Dht::client().map_err(|e| std::io::Error::other(format!("DHT client: {e}")))?);
-        Ok(Self {
-            dht,
+    /// Create an empty registry with no backends.
+    pub fn new(endpoint: &Endpoint) -> Self {
+        Self {
             endpoint: endpoint.clone(),
-            mdns: None,
-        })
+            backends: Vec::new(),
+        }
     }
 
-    /// Create a registry with mDNS enabled.
-    pub fn with_mdns(endpoint: &Endpoint, mdns: MdnsDiscovery) -> std::io::Result<Self> {
-        let mut reg = Self::new(endpoint)?;
-        reg.mdns = Some(Arc::new(mdns));
-        Ok(reg)
+    /// Add a discovery backend. Returns `&mut Self` for chaining.
+    pub fn add<D: Discovery>(&mut self, backend: D) -> &mut Self {
+        self.backends.push(Arc::new(backend));
+        self
     }
 
-    /// Enable mDNS on an existing registry.
-    pub fn set_mdns(&mut self, mdns: MdnsDiscovery) {
-        self.mdns = Some(Arc::new(mdns));
+    /// Add a pre-wrapped `Arc<dyn Discovery>` backend.
+    pub fn add_shared(&mut self, backend: Arc<dyn Discovery>) -> &mut Self {
+        self.backends.push(backend);
+        self
     }
 
-    /// Discover peers running a specific tonic service.
-    ///
-    /// Returns a stream of `EndpointId`s discovered via mDNS (local network)
-    /// and DHT (internet), deduplicated.
-    pub fn discover<S: NamedService>(&self) -> impl Stream<Item = crate::Result<EndpointId>> {
-        self.discover_with_options::<S>(DiscoveryOptions::default())
+    /// Access the endpoint.
+    pub fn endpoint(&self) -> &Endpoint {
+        &self.endpoint
     }
 
-    /// Discover peers with custom options.
-    pub fn discover_with_options<S: NamedService>(
-        &self,
-        options: DiscoveryOptions,
-    ) -> impl Stream<Item = crate::Result<EndpointId>> {
-        super::stream::discover_service_alpn(
-            &self.endpoint,
-            self.mdns.clone(),
-            Arc::clone(&self.dht),
-            service_to_alpn::<S>(),
-            options,
-        )
+    /// Discover peers for a service.
+    pub fn discover<S: NamedService>(&self) -> impl Stream<Item = crate::Result<Peer>> {
+        let alpn = service_to_alpn::<S>();
+        let feeds = self.build_feeds(&alpn);
+        SwarmEngine::new(self.endpoint.id(), &alpn, feeds)
     }
 
-    /// Start building a connection race for a service.
+    /// Build a locator builder for racing connections.
     pub fn find<S: NamedService + Send + 'static>(&self) -> LocatorBuilder<'_, S> {
         LocatorBuilder::new(self)
     }
 
-    /// Discover peers by raw ALPN bytes.
-    pub fn discover_alpn(
-        &self,
-        alpn: Vec<u8>,
-        options: DiscoveryOptions,
-    ) -> impl Stream<Item = crate::Result<EndpointId>> {
-        super::stream::discover_service_alpn(
-            &self.endpoint,
-            self.mdns.clone(),
-            Arc::clone(&self.dht),
-            alpn,
-            options,
-        )
-    }
-
-    /// Create a DHT publisher for server-side use.
-    pub(crate) fn create_publisher(&self, config: DhtPublisherConfig) -> DhtPublisher {
-        DhtPublisher::new(
-            Arc::clone(&self.dht),
-            *self.endpoint.id().as_bytes(),
-            config,
-        )
+    fn build_feeds(&self, alpn: &[u8]) -> Vec<PeerFeedSpec> {
+        self.backends
+            .iter()
+            .flat_map(|b| b.feeds(alpn))
+            .collect()
     }
 }
 
-/// Fluent builder for racing connections to a service.
+/// Fluent builder to configure a locator.
 pub struct LocatorBuilder<'a, S>
 where
     S: NamedService + Send + 'static,
 {
     registry: &'a ServiceRegistry,
-    opts: ConnectOptions,
-    _marker: PhantomData<S>,
+    locator_cfg: LocatorConfig,
+    _marker: std::marker::PhantomData<S>,
 }
 
 impl<'a, S> LocatorBuilder<'a, S>
@@ -144,38 +84,44 @@ where
     fn new(registry: &'a ServiceRegistry) -> Self {
         Self {
             registry,
-            opts: ConnectOptions::default(),
-            _marker: PhantomData,
+            locator_cfg: LocatorConfig::default(),
+            _marker: std::marker::PhantomData,
         }
     }
 
+    /// Maximum simultaneous connection attempts.
     pub fn max_inflight(mut self, n: usize) -> Self {
-        self.opts.max_inflight = n;
+        self.locator_cfg.max_inflight = n;
         self
     }
 
-    pub fn per_attempt_timeout(mut self, d: Duration) -> Self {
-        self.opts.per_attempt_timeout = d;
+    /// Timeout for each individual attempt.
+    pub fn timeout_each(mut self, d: Duration) -> Self {
+        self.locator_cfg.timeout_each = d;
         self
     }
 
-    pub fn overall_timeout(mut self, d: Duration) -> Self {
-        self.opts.overall_timeout = Some(d);
+    /// Overall timeout for the locator.
+    pub fn timeout(mut self, d: Duration) -> Self {
+        self.locator_cfg.timeout = Some(d);
         self
     }
 
-    pub fn success_buffer(mut self, n: usize) -> Self {
-        self.opts.success_buffer = n;
+    /// Buffer size for successful connections.
+    pub fn limit(mut self, n: usize) -> Self {
+        self.locator_cfg.limit = n;
         self
     }
 
-    /// Start the background racer and return the handle.
+    /// Start the locator and return its handle.
     pub fn start(self) -> Locator {
-        let peers = self.registry.discover::<S>();
-        connect::connect::<S, _>(self.registry.endpoint.clone(), peers, self.opts)
+        let alpn = service_to_alpn::<S>();
+        let feeds = self.registry.build_feeds(&alpn);
+        let stream = SwarmEngine::new(self.registry.endpoint.id(), &alpn, feeds);
+        Locator::spawn::<S, _>(self.registry.endpoint.clone(), stream, self.locator_cfg)
     }
 
-    /// Convenience: get the first successful channel.
+    /// Convenience: return the first successful channel.
     pub async fn first(self) -> crate::Result<Channel> {
         self.start().first().await
     }

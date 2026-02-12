@@ -68,4 +68,4 @@ pub use transport::{
     user_data_alpns, user_data_has_alpn, user_data_has_service, TransportBuilder, TransportGuard,
 };
 
-pub use iroh::discovery::UserData;
+pub use iroh::address_lookup::UserData;

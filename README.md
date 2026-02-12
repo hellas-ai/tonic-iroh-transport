@@ -42,7 +42,7 @@ tonic-iroh-transport = "0.0.3" # or path = ".." in a workspace
 tonic = { version = "0.13", features = ["prost"] }
 prost = "0.13"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
-iroh = { version = "0.91" }
+iroh = { version = "0.96" }
 anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
@@ -202,14 +202,16 @@ let channel = EchoServiceServer::<EchoServiceImpl>::connect(&client_endpoint, se
 ### 7. Swarm discovery and racing connects
 
 ```rust
-use tonic_iroh_transport::swarm::{ServiceRegistry, ConnectOptions};
+use tonic_iroh_transport::swarm::{ServiceRegistry, DhtBackend};
 use futures::StreamExt;
 use std::time::Duration;
 
-let registry = ServiceRegistry::new(&client_endpoint)?; // use with_mdns(...) to add mDNS
+let dht = DhtBackend::new(&client_endpoint)?;
+let mut registry = ServiceRegistry::new(&client_endpoint);
+registry.add(dht);
 
 // One-off peer lookup
-let peer_id = registry.discover::<EchoServiceServer<EchoServiceImpl>>()
+let peer = registry.discover::<EchoServiceServer<EchoServiceImpl>>()
     .next()
     .await
     .ok_or(anyhow!("no peers found"))??;
@@ -217,10 +219,17 @@ let peer_id = registry.discover::<EchoServiceServer<EchoServiceImpl>>()
 // Race multiple connection attempts and take the first channel
 let channel = registry
     .find::<EchoServiceServer<EchoServiceImpl>>()
-    .per_attempt_timeout(Duration::from_secs(1))
+    .timeout_each(Duration::from_secs(1))
     .max_inflight(8)
     .first()
     .await?;
+
+// Or keep it as a stream of ready channels
+let mut locator = registry.find::<EchoServiceServer<EchoServiceImpl>>().start();
+if let Some(conn) = locator.next().await {
+    let channel = conn?;
+    // ...use channel...
+}
 ```
 
 ## Examples

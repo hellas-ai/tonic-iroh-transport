@@ -447,10 +447,10 @@ async fn main() -> Result<()> {
     }
 
     if args.port > 0 {
-        endpoint_builder = endpoint_builder.bind_addr_v4(std::net::SocketAddrV4::new(
+        endpoint_builder = endpoint_builder.bind_addr(std::net::SocketAddrV4::new(
             std::net::Ipv4Addr::UNSPECIFIED,
             args.port,
-        ));
+        ))?;
     }
 
     if args.no_relay {

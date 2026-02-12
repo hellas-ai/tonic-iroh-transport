@@ -15,10 +15,10 @@ pre-release-hook = ["make", "all"]
 
 [features]
 default = []
-discovery = ["iroh/discovery-local-network", "iroh/discovery-pkarr-dht", "mainline", "sha2", "async-stream", "serde", "postcard"]
+discovery = ["iroh/address-lookup-mdns", "iroh/address-lookup-pkarr-dht", "mainline", "sha2", "async-stream", "serde", "postcard"]
 
 [dependencies]
-iroh = { version = "0.95" }
+iroh = { version = "0.96" }
 tonic = { version = "0.14", features = ["transport", "channel", "router"], default-features = false }
 tokio = { version = "1", default-features = false }
 tokio-stream = { version = "0.1", default-features = false }
