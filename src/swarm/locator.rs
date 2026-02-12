@@ -1,6 +1,11 @@
 //! Locator: races connection attempts to discovered peers.
 
-use std::{marker::PhantomData, pin::Pin, task::{Context, Poll}, time::Duration};
+use std::{
+    marker::PhantomData,
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
 
 use futures_util::{future::BoxFuture, stream::FuturesUnordered, Stream, StreamExt};
 use iroh::{Endpoint, EndpointAddr};
@@ -10,8 +15,8 @@ use tonic::transport::Channel;
 
 use tracing::debug;
 
-use crate::{IrohConnect, Result};
 use super::discovery::Peer;
+use crate::{IrohConnect, Result};
 
 /// Configuration for connection racing.
 #[derive(Clone, Debug)]
@@ -106,7 +111,12 @@ where
     S: NamedService + Send + 'static,
     St: Stream<Item = Result<Peer>> + Send + 'static,
 {
-    fn new(endpoint: Endpoint, peers: St, opts: LocatorConfig, tx: mpsc::Sender<Result<Channel>>) -> Self {
+    fn new(
+        endpoint: Endpoint,
+        peers: St,
+        opts: LocatorConfig,
+        tx: mpsc::Sender<Result<Channel>>,
+    ) -> Self {
         Self {
             endpoint,
             peers: Box::pin(peers),
@@ -122,8 +132,8 @@ where
         let timeout = self.opts.timeout;
         let run = async {
             loop {
-                let can_discover = !self.stream_exhausted
-                    && self.inflight.len() < self.opts.max_inflight;
+                let can_discover =
+                    !self.stream_exhausted && self.inflight.len() < self.opts.max_inflight;
                 let has_inflight = !self.inflight.is_empty();
 
                 if !can_discover && !has_inflight {

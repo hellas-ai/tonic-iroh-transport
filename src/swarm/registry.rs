@@ -60,10 +60,7 @@ impl ServiceRegistry {
     }
 
     fn build_feeds(&self, alpn: &[u8]) -> Vec<PeerFeedSpec> {
-        self.backends
-            .iter()
-            .flat_map(|b| b.feeds(alpn))
-            .collect()
+        self.backends.iter().flat_map(|b| b.feeds(alpn)).collect()
     }
 }
 

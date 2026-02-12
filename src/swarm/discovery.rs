@@ -27,11 +27,7 @@ pub struct Peer {
 }
 
 impl Peer {
-    pub(crate) fn new(
-        discovered: DiscoveredPeer,
-        source: &'static str,
-        source_trust: u8,
-    ) -> Self {
+    pub(crate) fn new(discovered: DiscoveredPeer, source: &'static str, source_trust: u8) -> Self {
         Self {
             id: discovered.id,
             source,

@@ -124,7 +124,8 @@ impl TransportBuilder {
 
         if !self.alpns.is_empty() {
             let user_data = encode_alpns(&self.alpns);
-            self.endpoint.set_user_data_for_address_lookup(Some(user_data));
+            self.endpoint
+                .set_user_data_for_address_lookup(Some(user_data));
         }
 
         // Start DHT publisher if one was provided

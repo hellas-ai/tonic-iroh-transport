@@ -124,6 +124,9 @@ mod tests {
             .expect("peer should be ok");
         assert_eq!(first.id(), remote);
 
-        assert!(engine.next().await.is_none(), "duplicate peer should be deduped");
+        assert!(
+            engine.next().await.is_none(),
+            "duplicate peer should be deduped"
+        );
     }
 }

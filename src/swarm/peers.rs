@@ -43,18 +43,14 @@ pub struct PeerFeedSpec {
 pub type PeerFeed = Pin<Box<dyn Stream<Item = Result<DiscoveredPeer>> + Send>>;
 
 /// Build a finite feed from static peers.
-pub fn static_feed(
-    peers: Vec<EndpointId>,
-    priority: u8,
-    trust: u8,
-    scope: Scope,
-) -> PeerFeedSpec {
+pub fn static_feed(peers: Vec<EndpointId>, priority: u8, trust: u8, scope: Scope) -> PeerFeedSpec {
     let peer_trust = trust;
-    let stream = futures_util::stream::iter(
-        peers
-            .into_iter()
-            .map(move |id| Ok(DiscoveredPeer { id, trust: peer_trust })),
-    )
+    let stream = futures_util::stream::iter(peers.into_iter().map(move |id| {
+        Ok(DiscoveredPeer {
+            id,
+            trust: peer_trust,
+        })
+    }))
     .boxed();
     PeerFeedSpec {
         name: "static",
@@ -168,7 +164,12 @@ pub fn peer_exchange_feed(
     let peer_trust = trust;
     let stream = BroadcastStream::new(rx)
         .filter_map(|msg| async move { msg.ok() })
-        .map(move |id| Ok(DiscoveredPeer { id, trust: peer_trust }))
+        .map(move |id| {
+            Ok(DiscoveredPeer {
+                id,
+                trust: peer_trust,
+            })
+        })
         .boxed();
     PeerFeedSpec {
         name: "peer-exchange",

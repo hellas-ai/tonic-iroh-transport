@@ -24,10 +24,8 @@ pub struct DhtBackend {
 impl DhtBackend {
     /// Create a new DHT backend, starting a DHT client.
     pub fn new(endpoint: &Endpoint) -> std::io::Result<Self> {
-        let dht = Arc::new(
-            Dht::client()
-                .map_err(|e| std::io::Error::other(format!("DHT client: {e}")))?,
-        );
+        let dht =
+            Arc::new(Dht::client().map_err(|e| std::io::Error::other(format!("DHT client: {e}")))?);
         Ok(Self {
             endpoint: endpoint.clone(),
             dht,

@@ -12,10 +12,10 @@ pub mod peers;
 pub mod record;
 pub mod registry;
 
-pub use discovery::{
-    Discovery, DiscoveredPeer, MdnsBackend, Peer, PeerExchangeBackend, StaticBackend,
-};
 pub use dht::backend::DhtBackend;
 pub use dht::publisher::DhtPublisherConfig;
+pub use discovery::{
+    DiscoveredPeer, Discovery, MdnsBackend, Peer, PeerExchangeBackend, StaticBackend,
+};
 pub use locator::Locator;
 pub use registry::ServiceRegistry;
