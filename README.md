@@ -38,17 +38,24 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-tonic-iroh-transport = "0.0.3" # or path = ".." in a workspace
-tonic = { version = "0.13", features = ["prost"] }
-prost = "0.13"
+tonic-iroh-transport = { version = "0.3", features = ["client", "server", "discovery"] }
+tonic = "0.14"
+tonic-prost = "0.14"
+prost = "0.14"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
-iroh = { version = "0.96" }
 anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 
 [build-dependencies]
-tonic-build = "0.13"
+tonic-prost-build = "0.14"
+```
+
+If you want a smaller build, disable defaults and opt into only what you need:
+
+```toml
+# client-only
+tonic-iroh-transport = { version = "0.3", default-features = false, features = ["client"] }
 ```
 
 ### 2. Protocol Definition
@@ -81,7 +88,7 @@ Create `build.rs` to generate Rust code from your protobuf:
 
 ```rust
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .out_dir("src/pb")
         .include_file("mod.rs")
         .build_transport(false)  // We provide our own transport
