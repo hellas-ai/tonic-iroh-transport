@@ -16,6 +16,10 @@ A transport layer that enables [tonic](https://github.com/hyperium/tonic) gRPC s
 - **NAT traversal**: Automatic hole-punching with relay fallback
 - **Service multiplexing**: Multiple gRPC services over the same P2P connection
 - **Type safety**: Full integration with tonic's generated clients and servers
+- **Feature split**:
+  - `client`: outbound connectors (`IrohConnect`, `connect_alpn`)
+  - `server`: inbound transport runtime (`TransportBuilder`)
+  - `discovery`: peer discovery and racing connects (`swarm` APIs)
 
 ## How it Works
 
@@ -38,10 +42,14 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-tonic-iroh-transport = { version = "0.3", features = ["client", "server", "discovery"] }
+# Default features are `client` + `server`.
+tonic-iroh-transport = "0.3"
+# If you use the swarm APIs in section 7, enable `discovery`:
+# tonic-iroh-transport = { version = "0.3", features = ["discovery"] }
 tonic = "0.14"
 tonic-prost = "0.14"
 prost = "0.14"
+iroh = "0.96"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
 anyhow = "1.0"
 tracing = "0.1"
@@ -169,7 +177,9 @@ This creates an iroh endpoint, registers the service with the transport, and sta
 Connect to the P2P service and make calls:
 
 ```rust
+use iroh::EndpointAddr;
 use tonic_iroh_transport::IrohConnect;
+use tonic::Request;
 use pb::echo::v1::{
     echo_service_client::EchoServiceClient,
     echo_service_server::EchoServiceServer,
