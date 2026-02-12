@@ -7,15 +7,6 @@ use std::task::{Context, Poll};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, info};
 
-/// Generate ALPN protocol from tonic service name.
-///
-/// Converts "echo.Echo" -> "/echo.Echo/1.0"
-/// Converts "p2p_chat.P2PChatService" -> "/p2p_chat.P2PChatService/1.0"
-pub fn service_to_alpn<T: tonic::server::NamedService>() -> Vec<u8> {
-    let service_name = T::NAME;
-    format!("/{service_name}/1.0").into_bytes()
-}
-
 /// A simple incoming stream for serving tonic gRPC over iroh connections.
 ///
 /// This follows the same pattern as tonic's UDS example using `serve_with_incoming`.
@@ -165,32 +156,5 @@ mod tests {
 
         let next = incoming.next().await.expect("stream should yield");
         assert!(next.is_err());
-    }
-
-    struct MockService;
-    impl tonic::server::NamedService for MockService {
-        const NAME: &'static str = "test.Service";
-    }
-
-    #[test]
-    fn test_alpn_generation() {
-        assert_eq!(service_to_alpn::<MockService>(), b"/test.Service/1.0");
-
-        // Test different service names by creating inline types
-        struct EchoService;
-        impl tonic::server::NamedService for EchoService {
-            const NAME: &'static str = "echo.Echo";
-        }
-
-        struct ChatService;
-        impl tonic::server::NamedService for ChatService {
-            const NAME: &'static str = "p2p_chat.P2PChatService";
-        }
-
-        assert_eq!(service_to_alpn::<EchoService>(), b"/echo.Echo/1.0");
-        assert_eq!(
-            service_to_alpn::<ChatService>(),
-            b"/p2p_chat.P2PChatService/1.0"
-        );
     }
 }

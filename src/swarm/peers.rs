@@ -10,7 +10,7 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::{BroadcastStream, IntervalStream};
 use tracing::{debug, trace};
 
-use crate::transport::user_data_has_alpn;
+use crate::user_data::user_data_has_alpn;
 use crate::Result;
 
 use super::dht::{resolver::DhtResolver, unix_minute};

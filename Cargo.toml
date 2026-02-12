@@ -14,24 +14,52 @@ allow-branch = ["master"]
 pre-release-hook = ["make", "all"]
 
 [features]
-default = []
-discovery = ["iroh/address-lookup-mdns", "iroh/address-lookup-pkarr-dht", "mainline", "sha2", "async-stream", "serde", "postcard"]
+default = ["client", "server"]
+client = [
+    "dep:http",
+    "dep:hyper-util",
+    "dep:tokio",
+    "dep:tower",
+    "tonic/codegen",
+    "tonic/channel",
+    "tonic/transport",
+]
+server = [
+    "dep:axum",
+    "dep:http",
+    "dep:tokio",
+    "dep:tokio-stream",
+    "dep:tower",
+    "tonic/codegen",
+    "tonic/router",
+    "tonic/server",
+    "tonic/transport",
+]
+discovery = [
+    "client",
+    "dep:tokio-stream",
+    "iroh/address-lookup-mdns",
+    "iroh/address-lookup-pkarr-dht",
+    "dep:mainline",
+    "dep:sha2",
+    "dep:async-stream",
+    "dep:serde",
+    "dep:postcard",
+]
 
 [dependencies]
 iroh = { version = "0.96" }
-tonic = { version = "0.14", features = ["transport", "channel", "router"], default-features = false }
-tokio = { version = "1", default-features = false }
-tokio-stream = { version = "0.1", default-features = false }
-http = { version = "1.4", default-features = false }
-hyper-util = { version = "0.1", default-features = false }
-hyper = { version = "1", default-features = false, features = ["http1", "http2", "client", "server"] }
-tower = { version = "0.4", features = ["util"], default-features = false }
+tonic = { version = "0.14", default-features = false }
+tokio = { version = "1", default-features = false, optional = true }
+tokio-stream = { version = "0.1", default-features = false, optional = true }
+http = { version = "1.4", default-features = false, optional = true }
+hyper-util = { version = "0.1", default-features = false, optional = true }
+tower = { version = "0.4", features = ["util"], default-features = false, optional = true }
 futures-util = { version = "0.3", default-features = false }
 thiserror = { version = "2.0", default-features = false }
 tracing = { version = "0.1", default-features = false }
 bytes = { version = "1.8", default-features = false }
-http-body = { version = "1.0", default-features = false }
-axum = { version = "0.8", default-features = false }
+axum = { version = "0.8", default-features = false, optional = true }
 
 # Mainline DHT discovery dependencies (optional)
 mainline = { version = "6", optional = true }

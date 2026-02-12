@@ -2,7 +2,6 @@
 
 use std::convert::Infallible;
 
-use iroh::address_lookup::UserData;
 use iroh::protocol::{Router, RouterBuilder};
 use iroh::Endpoint;
 use tokio::sync::broadcast;
@@ -11,44 +10,13 @@ use tonic::server::NamedService;
 use tonic::transport::server::Router as TonicRouter;
 use tonic::transport::Server;
 
+use crate::alpn::service_to_alpn;
 use crate::error::Result;
-use crate::server::{service_to_alpn, GrpcProtocolHandler, IrohIncoming};
+use crate::server::{GrpcProtocolHandler, IrohIncoming};
+use crate::user_data::encode_alpns;
 
 #[cfg(feature = "discovery")]
 use crate::swarm::dht::publisher::DhtPublisher;
-
-const ALPN_SEPARATOR: char = ',';
-
-fn encode_alpns(alpns: &[Vec<u8>]) -> UserData {
-    let strings: Vec<String> = alpns
-        .iter()
-        .filter_map(|a| String::from_utf8(a.clone()).ok())
-        .collect();
-    strings.join(&ALPN_SEPARATOR.to_string()).parse().unwrap()
-}
-
-fn decode_alpns(user_data: &UserData) -> Vec<Vec<u8>> {
-    let s: &str = user_data.as_ref();
-    s.split(ALPN_SEPARATOR)
-        .map(|part| part.as_bytes().to_vec())
-        .collect()
-}
-
-/// Check if user_data contains the ALPN for a specific tonic service.
-pub fn user_data_has_service<S: NamedService>(user_data: &UserData) -> bool {
-    let target = service_to_alpn::<S>();
-    decode_alpns(user_data).iter().any(|alpn| alpn == &target)
-}
-
-/// Check if user_data contains a specific ALPN.
-pub fn user_data_has_alpn(user_data: &UserData, alpn: &[u8]) -> bool {
-    decode_alpns(user_data).iter().any(|a| a == alpn)
-}
-
-/// Get all ALPNs from user_data.
-pub fn user_data_alpns(user_data: &UserData) -> Vec<Vec<u8>> {
-    decode_alpns(user_data)
-}
 
 /// Trait object to register heterogeneous tonic services.
 trait AddService: Send {

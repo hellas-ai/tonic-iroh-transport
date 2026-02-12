@@ -28,7 +28,7 @@ use std::future::{Future, IntoFuture};
 use std::pin::Pin;
 use std::time::Duration;
 
-use crate::{server::service_to_alpn, stream::IrohStream, Error, Result};
+use crate::{alpn::service_to_alpn, stream::IrohStream, Error, Result};
 use http::Uri;
 use hyper_util::rt::TokioIo;
 use iroh::endpoint::{ConnectingError, ConnectionError, QuicTransportConfig};

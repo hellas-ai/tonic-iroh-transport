@@ -1,5 +1,11 @@
 //! Transport layer for using tonic gRPC over iroh p2p connections.
 //!
+//! # Feature flags
+//!
+//! - `client`: Outbound connectors (`IrohConnect`, `connect_alpn`).
+//! - `server`: Inbound transport runtime (`TransportBuilder`, `TransportGuard`).
+//! - `discovery`: Peer discovery/swarm support (depends on `client`).
+//!
 //! # Example
 //!
 //! ```no_run
@@ -50,22 +56,34 @@
 
 pub use iroh;
 
+#[cfg(any(feature = "client", feature = "server", feature = "discovery"))]
+mod alpn;
+#[cfg(feature = "client")]
 pub mod client;
 pub mod error;
+#[cfg(feature = "server")]
 pub(crate) mod server;
+#[cfg(any(feature = "client", feature = "server"))]
 pub mod stream;
+#[cfg(feature = "server")]
 pub mod transport;
+#[cfg(any(feature = "server", feature = "discovery"))]
+mod user_data;
 
 #[cfg(feature = "discovery")]
 pub mod swarm;
 
 // Re-export key types
+#[cfg(feature = "client")]
 pub use client::{connect_alpn, ConnectBuilder, IrohConnect};
 pub use error::{Error, Result};
+#[cfg(any(feature = "client", feature = "server"))]
 pub use stream::{IrohContext, IrohStream};
 
-pub use transport::{
-    user_data_alpns, user_data_has_alpn, user_data_has_service, TransportBuilder, TransportGuard,
-};
+#[cfg(feature = "server")]
+pub use transport::{TransportBuilder, TransportGuard};
+#[cfg(feature = "server")]
+pub use user_data::{user_data_alpns, user_data_has_alpn, user_data_has_service};
 
+#[cfg(feature = "server")]
 pub use iroh::address_lookup::UserData;

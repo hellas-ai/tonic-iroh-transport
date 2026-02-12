@@ -12,7 +12,7 @@ use super::discovery::{Discovery, Peer};
 use super::engine::SwarmEngine;
 use super::locator::{Locator, LocatorConfig};
 use super::peers::PeerFeedSpec;
-use crate::server::service_to_alpn;
+use crate::alpn::service_to_alpn;
 
 /// Unified registry for pluggable peer discovery backends.
 #[derive(Clone)]
