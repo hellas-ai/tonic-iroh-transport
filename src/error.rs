@@ -19,6 +19,7 @@ pub enum Error {
     QuicRead(#[from] iroh::endpoint::ReadError),
 
     /// Tonic transport error.
+    #[cfg(any(feature = "client", feature = "server"))]
     #[error("Tonic transport error: {0}")]
     TonicTransport(#[from] tonic::transport::Error),
 
@@ -29,11 +30,22 @@ pub enum Error {
     /// Connection error.
     #[error("Connection error: {0}")]
     Connection(String),
+
+    /// DHT discovery error.
+    #[cfg(feature = "discovery")]
+    #[error("DHT discovery error: {0}")]
+    DhtDiscovery(String),
 }
 
 impl Error {
     /// Create a connection error.
     pub fn connection<S: Into<String>>(msg: S) -> Self {
         Self::Connection(msg.into())
+    }
+
+    /// Create a DHT discovery error.
+    #[cfg(feature = "discovery")]
+    pub fn dht_discovery<S: Into<String>>(msg: S) -> Self {
+        Self::DhtDiscovery(msg.into())
     }
 }

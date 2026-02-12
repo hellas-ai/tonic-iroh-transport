@@ -1,4 +1,4 @@
-//! Unified transport builder for composing RPC and gossip over a single iroh router.
+//! Unified transport builder for composing RPC services over a single iroh router.
 
 use std::convert::Infallible;
 
@@ -10,11 +10,13 @@ use tonic::server::NamedService;
 use tonic::transport::server::Router as TonicRouter;
 use tonic::transport::Server;
 
+use crate::alpn::service_to_alpn;
 use crate::error::Result;
-use crate::server::{service_to_alpn, GrpcProtocolHandler, IrohIncoming};
+use crate::server::{GrpcProtocolHandler, IrohIncoming};
+use crate::user_data::encode_alpns;
 
-#[cfg(feature = "gossip")]
-use crate::gossip::{GossipConfig, HandlerSpawner};
+#[cfg(feature = "discovery")]
+use crate::swarm::dht::publisher::DhtPublisher;
 
 /// Trait object to register heterogeneous tonic services.
 trait AddService: Send {
@@ -61,16 +63,13 @@ where
     }
 }
 
-/// Builder for composing RPC and gossip over a single router.
+/// Builder for composing RPC services over a single iroh router.
 pub struct TransportBuilder {
     endpoint: Endpoint,
     services: Vec<Box<dyn AddService>>,
-    #[cfg(feature = "gossip")]
-    gossip_handlers: Vec<HandlerSpawner>,
-    #[cfg(feature = "gossip")]
-    gossip_config: GossipConfig,
-    #[cfg(feature = "gossip")]
-    gossip_enabled: bool,
+    alpns: Vec<Vec<u8>>,
+    #[cfg(feature = "discovery")]
+    publisher: Option<DhtPublisher>,
 }
 
 impl TransportBuilder {
@@ -79,13 +78,17 @@ impl TransportBuilder {
         Self {
             endpoint,
             services: Vec::new(),
-            #[cfg(feature = "gossip")]
-            gossip_handlers: Vec::new(),
-            #[cfg(feature = "gossip")]
-            gossip_config: GossipConfig::default(),
-            #[cfg(feature = "gossip")]
-            gossip_enabled: false,
+            alpns: Vec::new(),
+            #[cfg(feature = "discovery")]
+            publisher: None,
         }
+    }
+
+    /// Enable DHT publishing with a pre-configured publisher.
+    #[cfg(feature = "discovery")]
+    pub fn with_publisher(mut self, publisher: DhtPublisher) -> Self {
+        self.publisher = Some(publisher);
+        self
     }
 
     /// Add a tonic RPC service.
@@ -101,32 +104,12 @@ impl TransportBuilder {
         <S as tower::Service<http::Request<tonic::body::Body>>>::Response:
             axum::response::IntoResponse,
     {
+        self.alpns.push(service_to_alpn::<S>());
         self.services.push(Box::new(service));
         self
     }
 
-    /// Set the gossip configuration (bootstrap peers, etc.).
-    #[cfg(feature = "gossip")]
-    pub fn with_gossip_config(mut self, config: GossipConfig) -> Self {
-        self.gossip_config = config;
-        self.gossip_enabled = true;
-        self
-    }
-
-    /// Add a gossip handler using the shared gossip configuration.
-    #[cfg(feature = "gossip")]
-    pub fn add_gossip<T, H>(mut self, handler: H) -> Self
-    where
-        T: prost::Message + prost::Name + Send + Default + 'static,
-        H: crate::gossip::GossipHandler<T>,
-    {
-        self.gossip_handlers
-            .push(crate::gossip::handler::<T, _>(handler));
-        self.gossip_enabled = true;
-        self
-    }
-
-    /// Spawn the transport (router, tonic server, gossip handlers).
+    /// Spawn the transport (router, tonic server).
     pub async fn spawn(self) -> Result<TransportGuard> {
         let (shutdown_tx, _) = broadcast::channel(1);
         let (incoming, sender) = IrohIncoming::new();
@@ -139,11 +122,20 @@ impl TransportBuilder {
             tonic_router = Some(tr);
         }
 
-        #[cfg(feature = "gossip")]
-        let gossip = if self.gossip_enabled {
-            let gossip = iroh_gossip::net::Gossip::builder().spawn(self.endpoint.clone());
-            builder = builder.accept(iroh_gossip::net::GOSSIP_ALPN, gossip.clone());
-            Some(gossip)
+        if !self.alpns.is_empty() {
+            let user_data = encode_alpns(&self.alpns);
+            self.endpoint
+                .set_user_data_for_address_lookup(Some(user_data));
+        }
+
+        // Start DHT publisher if one was provided
+        #[cfg(feature = "discovery")]
+        let dht_publisher = if let Some(mut publisher) = self.publisher {
+            for alpn in &self.alpns {
+                publisher.add_service(alpn.clone());
+            }
+            publisher.start(shutdown_tx.subscribe());
+            Some(publisher)
         } else {
             None
         };
@@ -168,67 +160,6 @@ impl TransportBuilder {
             });
         }
 
-        #[cfg(feature = "gossip")]
-        if let Some(gossip) = gossip.clone() {
-            let mut shutdown_rx = shutdown_tx.subscribe();
-            let mut tasks = JoinSet::new();
-            for spawn in self.gossip_handlers.into_iter() {
-                tasks.spawn(spawn(
-                    gossip.clone(),
-                    self.gossip_config.clone(),
-                    shutdown_tx.subscribe(),
-                ));
-            }
-
-            driver.spawn(async move {
-                use std::time::Duration;
-
-                const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
-
-                loop {
-                    if tasks.is_empty() {
-                        break;
-                    }
-
-                    tokio::select! {
-                        _ = shutdown_rx.recv() => {
-                            let grace = tokio::time::sleep(SHUTDOWN_GRACE);
-                            tokio::pin!(grace);
-
-                            while !tasks.is_empty() {
-                                tokio::select! {
-                                    _ = &mut grace => break,
-                                    Some(res) = tasks.join_next() => {
-                                        if let Err(e) = res {
-                                            tracing::warn!("gossip handler task failed: {e}");
-                                        }
-                                    }
-                                }
-                            }
-
-                            if !tasks.is_empty() {
-                                tasks.abort_all();
-                                while let Some(res) = tasks.join_next().await {
-                                    if let Err(e) = res {
-                                        if e.is_cancelled() {
-                                            continue;
-                                        }
-                                        tracing::warn!("gossip handler task failed: {e}");
-                                    }
-                                }
-                            }
-                            break;
-                        }
-                        Some(res) = tasks.join_next() => {
-                            if let Err(e) = res {
-                                tracing::warn!("gossip handler task failed: {e}");
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
         let driver_handle = tokio::spawn(async move {
             while let Some(res) = driver.join_next().await {
                 if let Err(e) = res {
@@ -242,20 +173,20 @@ impl TransportBuilder {
             shutdown_tx,
             driver: driver_handle,
             router,
-            #[cfg(feature = "gossip")]
-            gossip,
+            #[cfg(feature = "discovery")]
+            dht_publisher,
         })
     }
 }
 
-/// Guard for a running transport (router + optional RPC + optional gossip).
+/// Guard for a running transport (router + optional RPC).
 pub struct TransportGuard {
     endpoint: Endpoint,
     shutdown_tx: broadcast::Sender<()>,
     driver: tokio::task::JoinHandle<()>,
     router: Router,
-    #[cfg(feature = "gossip")]
-    gossip: Option<iroh_gossip::net::Gossip>,
+    #[cfg(feature = "discovery")]
+    dht_publisher: Option<DhtPublisher>,
 }
 
 impl TransportGuard {
@@ -269,30 +200,16 @@ impl TransportGuard {
         Some(&self.router)
     }
 
-    /// Access the gossip handle, if configured.
-    #[cfg(feature = "gossip")]
-    pub fn gossip(&self) -> Option<&iroh_gossip::net::Gossip> {
-        self.gossip.as_ref()
-    }
-
-    /// Graceful shutdown of gossip, tonic, and router.
+    /// Graceful shutdown of tonic and router.
     #[allow(unused_mut)]
     pub async fn shutdown(mut self) -> Result<()> {
         let _ = self.shutdown_tx.send(());
         let _ = self.driver.await;
 
-        #[cfg(feature = "gossip")]
-        if let Some(gossip) = self.gossip.take() {
-            if let Err(e) = gossip.shutdown().await {
-                match e {
-                    iroh_gossip::net::Error::ActorDropped { .. } => {
-                        tracing::debug!("gossip already shut down");
-                    }
-                    e => {
-                        tracing::warn!("gossip shutdown error: {e}");
-                    }
-                }
-            }
+        // Stop DHT publisher if running
+        #[cfg(feature = "discovery")]
+        if let Some(ref mut publisher) = self.dht_publisher {
+            publisher.stop().await;
         }
 
         if let Err(e) = self.router.shutdown().await {

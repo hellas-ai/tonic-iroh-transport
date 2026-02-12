@@ -22,10 +22,7 @@ use pb::p2p_chat::v1::{
 };
 
 use tonic_iroh_transport::iroh::{self, EndpointAddr, EndpointId, SecretKey};
-use tonic_iroh_transport::{
-    gossip::{GossipHandler, GossipRequest},
-    IrohConnect, IrohContext, TransportBuilder,
-};
+use tonic_iroh_transport::{IrohConnect, IrohContext, TransportBuilder};
 
 #[derive(Parser)]
 #[clap(name = "p2p-chat")]
@@ -119,7 +116,6 @@ struct ChatState {
     request_count: Arc<std::sync::atomic::AtomicU64>,
     max_requests: Option<u64>,
     shutdown_tx: Arc<tokio::sync::broadcast::Sender<()>>,
-    gossip_sender: tokio::sync::mpsc::UnboundedSender<PublicMessage>,
 }
 
 impl std::fmt::Debug for ChatState {
@@ -139,13 +135,8 @@ impl ChatState {
     fn new(
         node_id: String,
         max_requests: Option<u64>,
-    ) -> (
-        Self,
-        tokio::sync::broadcast::Receiver<()>,
-        tokio::sync::mpsc::UnboundedReceiver<PublicMessage>,
-    ) {
+    ) -> (Self, tokio::sync::broadcast::Receiver<()>) {
         let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
-        let (pub_tx, pub_rx) = tokio::sync::mpsc::unbounded_channel();
         let state = Self {
             messages: Arc::new(RwLock::new(Vec::new())),
             subscribers: Arc::new(RwLock::new(HashMap::new())),
@@ -153,9 +144,8 @@ impl ChatState {
             request_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             max_requests,
             shutdown_tx: Arc::new(shutdown_tx),
-            gossip_sender: pub_tx,
         };
-        (state, shutdown_rx, pub_rx)
+        (state, shutdown_rx)
     }
 
     async fn add_message(&self, message: ChatMessage) {
@@ -457,10 +447,10 @@ async fn main() -> Result<()> {
     }
 
     if args.port > 0 {
-        endpoint_builder = endpoint_builder.bind_addr_v4(std::net::SocketAddrV4::new(
+        endpoint_builder = endpoint_builder.bind_addr(std::net::SocketAddrV4::new(
             std::net::Ipv4Addr::UNSPECIFIED,
             args.port,
-        ));
+        ))?;
     }
 
     if args.no_relay {
@@ -481,17 +471,13 @@ async fn main() -> Result<()> {
     }
     info!("Node Address: {:?}", node_addr);
 
-    let (chat_state, mut shutdown_rx, mut gossip_rx) =
-        ChatState::new(node_id.clone(), args.max_requests);
+    let (chat_state, mut shutdown_rx) = ChatState::new(node_id.clone(), args.max_requests);
     let chat_service = ChatServiceImpl::new(chat_state.clone());
     let node_service = NodeServiceImpl::new(chat_state.clone());
 
     let transport_guard = TransportBuilder::new(endpoint.clone())
         .add_rpc(P2pChatServiceServer::new(chat_service))
         .add_rpc(NodeServiceServer::new(node_service))
-        .add_gossip::<PublicMessage, _>(PublicChatHandler {
-            state: chat_state.clone(),
-        })
         .spawn()
         .await?;
 
@@ -502,7 +488,6 @@ async fn main() -> Result<()> {
     info!("Available protocols:");
     info!("  - Chat Service: /p2p_chat.P2pChatService/1.0");
     info!("  - Node Service: /p2p_chat.NodeService/1.0");
-    info!("  - Gossip channel: /pkg.ChatRoom/1.0");
 
     if let Some(target_node_id) = args.connect_to {
         let endpoint_clone = endpoint_for_client.clone();
@@ -523,71 +508,21 @@ async fn main() -> Result<()> {
         });
     }
 
-    loop {
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                info!("Shutting down node...");
-                break;
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            info!("Shutting down node...");
+        }
+        result = shutdown_rx.recv() => {
+            match result {
+                Ok(_) => info!("Graceful shutdown triggered by max requests"),
+                Err(_) => info!("Shutdown channel closed"),
             }
-            result = shutdown_rx.recv() => {
-                match result {
-                    Ok(_) => info!("Graceful shutdown triggered by max requests"),
-                    Err(_) => info!("Shutdown channel closed"),
-                }
-                break;
-            }
-            Some(msg) = gossip_rx.recv() => {
-                info!("Received public gossip message: {}", msg.content);
-                chat_state.add_message(ChatMessage {
-                    id: uuid::new_v4().to_string(),
-                    sender_id: msg.sender_id.clone(),
-                    recipient_id: "public".into(),
-                    content: msg.content.clone(),
-                    timestamp: chrono::Utc::now().timestamp(),
-                    r#type: MessageType::Text.into(),
-                }).await;
-            }
-            else => break,
         }
     }
 
     transport_guard.shutdown().await?;
 
     Ok(())
-}
-
-// ----------------------------
-// Gossip types and handler
-// ----------------------------
-
-#[derive(Clone, PartialEq, prost::Message)]
-pub struct PublicMessage {
-    #[prost(string, tag = "1")]
-    pub sender_id: String,
-    #[prost(string, tag = "2")]
-    pub content: String,
-}
-
-impl prost::Name for PublicMessage {
-    const NAME: &'static str = "ChatRoom";
-    const PACKAGE: &'static str = "pkg";
-}
-
-#[derive(Clone)]
-struct PublicChatHandler {
-    state: ChatState,
-}
-
-#[tonic::async_trait]
-impl GossipHandler<PublicMessage> for PublicChatHandler {
-    async fn handle(&self, request: GossipRequest<PublicMessage>) -> Result<(), Status> {
-        let msg = request.into_inner();
-        self.state
-            .gossip_sender
-            .send(msg)
-            .map_err(|e| Status::internal(format!("gossip channel closed: {e}")))?;
-        Ok(())
-    }
 }
 
 async fn connect_and_execute_command(

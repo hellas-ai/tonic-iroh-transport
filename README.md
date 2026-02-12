@@ -16,6 +16,10 @@ A transport layer that enables [tonic](https://github.com/hyperium/tonic) gRPC s
 - **NAT traversal**: Automatic hole-punching with relay fallback
 - **Service multiplexing**: Multiple gRPC services over the same P2P connection
 - **Type safety**: Full integration with tonic's generated clients and servers
+- **Feature split**:
+  - `client`: outbound connectors (`IrohConnect`, `connect_alpn`)
+  - `server`: inbound transport runtime (`TransportBuilder`)
+  - `discovery`: peer discovery and racing connects (`swarm` APIs)
 
 ## How it Works
 
@@ -38,17 +42,28 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-tonic-iroh-transport = "0.0.3" # or path = ".." in a workspace
-tonic = { version = "0.13", features = ["prost"] }
-prost = "0.13"
+# Default features are `client` + `server`.
+tonic-iroh-transport = "0.3"
+# If you use the swarm APIs in section 7, enable `discovery`:
+# tonic-iroh-transport = { version = "0.3", features = ["discovery"] }
+tonic = "0.14"
+tonic-prost = "0.14"
+prost = "0.14"
+iroh = "0.96"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
-iroh = { version = "0.91" }
 anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 
 [build-dependencies]
-tonic-build = "0.13"
+tonic-prost-build = "0.14"
+```
+
+If you want a smaller build, disable defaults and opt into only what you need:
+
+```toml
+# client-only
+tonic-iroh-transport = { version = "0.3", default-features = false, features = ["client"] }
 ```
 
 ### 2. Protocol Definition
@@ -81,7 +96,7 @@ Create `build.rs` to generate Rust code from your protobuf:
 
 ```rust
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .out_dir("src/pb")
         .include_file("mod.rs")
         .build_transport(false)  // We provide our own transport
@@ -162,7 +177,9 @@ This creates an iroh endpoint, registers the service with the transport, and sta
 Connect to the P2P service and make calls:
 
 ```rust
+use iroh::EndpointAddr;
 use tonic_iroh_transport::IrohConnect;
+use tonic::Request;
 use pb::echo::v1::{
     echo_service_client::EchoServiceClient,
     echo_service_server::EchoServiceServer,
@@ -197,6 +214,39 @@ use std::time::Duration;
 let channel = EchoServiceServer::<EchoServiceImpl>::connect(&client_endpoint, server_addr)
     .connect_timeout(Duration::from_secs(10))
     .await?;
+```
+
+### 7. Swarm discovery and racing connects
+
+```rust
+use tonic_iroh_transport::swarm::{ServiceRegistry, DhtBackend};
+use futures::StreamExt;
+use std::time::Duration;
+
+let dht = DhtBackend::new(&client_endpoint)?;
+let mut registry = ServiceRegistry::new(&client_endpoint);
+registry.add(dht);
+
+// One-off peer lookup
+let peer = registry.discover::<EchoServiceServer<EchoServiceImpl>>()
+    .next()
+    .await
+    .ok_or(anyhow!("no peers found"))??;
+
+// Race multiple connection attempts and take the first channel
+let channel = registry
+    .find::<EchoServiceServer<EchoServiceImpl>>()
+    .timeout_each(Duration::from_secs(1))
+    .max_inflight(8)
+    .first()
+    .await?;
+
+// Or keep it as a stream of ready channels
+let mut locator = registry.find::<EchoServiceServer<EchoServiceImpl>>().start();
+if let Some(conn) = locator.next().await {
+    let channel = conn?;
+    // ...use channel...
+}
 ```
 
 ## Examples

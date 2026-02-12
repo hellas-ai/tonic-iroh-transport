@@ -12,7 +12,7 @@ use tonic_iroh_transport::{IrohConnect, IrohStream, TransportBuilder};
 async fn local_endpoint() -> Endpoint {
     Endpoint::builder()
         .relay_mode(RelayMode::Disabled)
-        .clear_discovery()
+        .clear_address_lookup()
         .bind()
         .await
         .unwrap()
