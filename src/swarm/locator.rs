@@ -50,14 +50,26 @@ pub struct Locator {
 
 impl Locator {
     /// Await the first successful channel and stop the background task.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no peer could be reached.
     pub async fn first(mut self) -> Result<Channel> {
-        match self.rx.recv().await {
-            Some(res) => {
-                self.task.abort();
-                res
+        let mut last_error = None;
+
+        while let Some(res) = self.rx.recv().await {
+            match res {
+                Ok(channel) => {
+                    self.task.abort();
+                    return Ok(channel);
+                }
+                Err(err) => {
+                    last_error = Some(err);
+                }
             }
-            None => Err(crate::Error::connection("no peers reachable")),
         }
+
+        Err(last_error.unwrap_or_else(|| crate::Error::connection("no peers reachable")))
     }
 
     /// Spawn a locator over a stream of peers.
@@ -161,7 +173,7 @@ where
                                     source = peer.source(),
                                     "locator: discovered peer, pushing connect attempt"
                                 );
-                                self.push_attempt(peer);
+                                self.push_attempt(&peer);
                             }
                             Some(Err(err)) => {
                                 debug!(?err, "locator: discovery stream error");
@@ -184,7 +196,7 @@ where
         }
     }
 
-    fn push_attempt(&mut self, peer: Peer) {
+    fn push_attempt(&mut self, peer: &Peer) {
         let ep = self.endpoint.clone();
         let timeout = self.opts.timeout_each;
         let node_id = peer.id();
@@ -194,5 +206,52 @@ where
             builder.await
         });
         self.inflight.push(fut);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::sync::mpsc;
+    use tonic::transport::Endpoint;
+
+    use super::Locator;
+
+    #[tokio::test]
+    async fn first_skips_errors_until_success() {
+        let (tx, rx) = mpsc::channel(4);
+        let task = tokio::spawn(async move {
+            tx.send(Err(crate::Error::connection("initial failure")))
+                .await
+                .expect("error send should succeed");
+            tx.send(Ok(Endpoint::from_static("http://[::]:50051").connect_lazy()))
+                .await
+                .expect("success send should succeed");
+        });
+
+        let locator = Locator { task, rx };
+        let result = locator.first().await;
+
+        assert!(result.is_ok(), "expected success after initial failure");
+    }
+
+    #[tokio::test]
+    async fn first_returns_last_error_if_no_success_arrives() {
+        let (tx, rx) = mpsc::channel(4);
+        let task = tokio::spawn(async move {
+            tx.send(Err(crate::Error::connection("first failure")))
+                .await
+                .expect("first error send should succeed");
+            tx.send(Err(crate::Error::connection("final failure")))
+                .await
+                .expect("second error send should succeed");
+        });
+
+        let locator = Locator { task, rx };
+        let result = locator.first().await;
+
+        match result {
+            Err(crate::Error::Connection(message)) => assert_eq!(message, "final failure"),
+            other => panic!("expected final connection error, got {other:?}"),
+        }
     }
 }

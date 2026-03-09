@@ -4,28 +4,34 @@ use crate::stream::{IrohContext, IrohStream};
 use futures_util::Stream;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, info};
+use tokio::sync::mpsc::{self, error::TrySendError};
+use tokio_stream::wrappers::ReceiverStream;
+use tracing::{debug, error, info, warn};
+
+pub(crate) const DEFAULT_INCOMING_BUFFER_CAPACITY: usize = 256;
+const OVERLOAD_STREAM_ERROR_CODE: u32 = 1;
 
 /// A simple incoming stream for serving tonic gRPC over iroh connections.
 ///
 /// This follows the same pattern as tonic's UDS example using `serve_with_incoming`.
 pub struct IrohIncoming {
-    receiver: UnboundedReceiverStream<std::result::Result<IrohStream, std::io::Error>>,
+    receiver: ReceiverStream<std::result::Result<IrohStream, std::io::Error>>,
 }
 
 impl IrohIncoming {
     /// Create a new incoming stream from an iroh endpoint.
     ///
-    /// Returns the incoming stream and a sender that the ProtocolHandler should use
+    /// Returns the incoming stream and a sender that the `ProtocolHandler` should use
     /// to send accepted connections.
-    pub fn new() -> (
+    pub fn new(
+        buffer_capacity: usize,
+    ) -> (
         Self,
-        tokio::sync::mpsc::UnboundedSender<std::result::Result<IrohStream, std::io::Error>>,
+        mpsc::Sender<std::result::Result<IrohStream, std::io::Error>>,
     ) {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel(buffer_capacity);
         let incoming = Self {
-            receiver: UnboundedReceiverStream::new(rx),
+            receiver: ReceiverStream::new(rx),
         };
         (incoming, tx)
     }
@@ -42,16 +48,15 @@ impl Stream for IrohIncoming {
 /// accepts iroh connections and convert them to gRPC streams
 #[derive(Clone, Debug)]
 pub struct GrpcProtocolHandler {
-    pub(crate) sender:
-        tokio::sync::mpsc::UnboundedSender<std::result::Result<IrohStream, std::io::Error>>,
+    pub(crate) sender: mpsc::Sender<std::result::Result<IrohStream, std::io::Error>>,
     service_name: String,
 }
 
 impl GrpcProtocolHandler {
-    /// Create a GrpcProtocolHandler using an existing sender.
+    /// Create a `GrpcProtocolHandler` using an existing sender.
     pub fn with_sender(
         service_name: impl Into<String>,
-        sender: tokio::sync::mpsc::UnboundedSender<std::result::Result<IrohStream, std::io::Error>>,
+        sender: mpsc::Sender<std::result::Result<IrohStream, std::io::Error>>,
     ) -> Self {
         Self {
             sender,
@@ -66,7 +71,6 @@ impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
         connection: iroh::endpoint::Connection,
     ) -> impl futures_util::Future<Output = Result<(), iroh::protocol::AcceptError>> + std::marker::Send
     {
-        // Spawn a task to handle this connection's stream
         let sender = self.sender.clone();
         let service_name = self.service_name.clone();
 
@@ -78,15 +82,15 @@ impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
                 service_name, remote_node_id
             );
 
-            let service_name_clone = service_name.clone();
-            tokio::spawn(async move {
-                loop {
-                    // Each accept_bi() call represents one gRPC call
-                    match connection.accept_bi().await {
-                        Ok((send, recv)) => {
-                            debug!("Accepted new stream for service '{}'", service_name_clone);
+            loop {
+                // The router already runs each accept future on its own task.
+                // Keeping the stream loop in this future lets router shutdown
+                // own the task lifecycle instead of leaving a detached task behind.
+                if let Ok((mut send, mut recv)) = connection.accept_bi().await {
+                    debug!("Accepted new stream for service '{}'", service_name);
 
-                            // Create IrohStream for this gRPC call
+                    match sender.try_reserve() {
+                        Ok(permit) => {
                             let stream = IrohStream::new(
                                 send,
                                 recv,
@@ -97,29 +101,30 @@ impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
                                     alpn: connection.alpn().to_vec(),
                                 },
                             );
-
-                            // Send to tonic's serve_with_incoming (don't wrap in TokioIo)
-                            if let Err(e) = sender.send(Ok(stream)) {
-                                error!(
-                                    "Failed to send stream to handler for service '{}': {}",
-                                    service_name_clone, e
-                                );
-                                break;
-                            }
+                            permit.send(Ok(stream));
                         }
-                        Err(_) => {
-                            // Connection closed or error
-                            debug!("Connection closed for service '{}'", service_name_clone);
+                        Err(TrySendError::Full(())) => {
+                            warn!(
+                                "Dropping overloaded stream for service '{}' from peer: {}",
+                                service_name, remote_node_id
+                            );
+                            reject_stream(&mut send, &mut recv);
+                        }
+                        Err(TrySendError::Closed(())) => {
+                            error!(
+                                "Failed to forward stream to handler for service '{}': channel closed",
+                                service_name
+                            );
+                            reject_stream(&mut send, &mut recv);
                             break;
                         }
                     }
+                } else {
+                    // Connection closed or error
+                    debug!("Connection closed for service '{}'", service_name);
+                    break;
                 }
-            });
-
-            debug!(
-                "Successfully set up stream handler for service '{}' from peer: {}",
-                service_name, remote_node_id
-            );
+            }
 
             Ok::<(), iroh::protocol::AcceptError>(())
         }
@@ -132,10 +137,15 @@ impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
                 "Shutting down gRPC protocol handler for service: {}",
                 service_name
             );
-            // The spawned tasks will end when the connection closes
-            // The incoming stream will end when the sender is dropped
+            // Active connection handlers are owned by the router because accept()
+            // keeps the per-connection loop inside the router-managed future.
         }
     }
+}
+
+fn reject_stream(send: &mut iroh::endpoint::SendStream, recv: &mut iroh::endpoint::RecvStream) {
+    let _ = recv.stop(OVERLOAD_STREAM_ERROR_CODE.into());
+    let _ = send.reset(OVERLOAD_STREAM_ERROR_CODE.into());
 }
 
 #[cfg(test)]
@@ -146,15 +156,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_with_sender_uses_existing_channel() {
-        let (mut incoming, sender) = IrohIncoming::new();
+        let (mut incoming, sender) = IrohIncoming::new(1);
         let _handler = GrpcProtocolHandler::with_sender("shared-service", sender.clone());
 
         // Send an error through the shared sender and verify the incoming stream receives it.
         sender
-            .send(Err(io::Error::new(io::ErrorKind::Other, "boom")))
+            .send(Err(io::Error::other("boom")))
+            .await
             .expect("send should succeed");
 
         let next = incoming.next().await.expect("stream should yield");
         assert!(next.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_incoming_channel_is_bounded() {
+        let (_incoming, sender) = IrohIncoming::new(1);
+
+        sender
+            .try_send(Err(io::Error::other("first")))
+            .expect("first send should fit in bounded queue");
+
+        let second = sender.try_send(Err(io::Error::other("second")));
+        assert!(matches!(second, Err(TrySendError::Full(_))));
     }
 }

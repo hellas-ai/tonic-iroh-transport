@@ -37,15 +37,16 @@ use tonic::transport::{Channel, Endpoint};
 use tower::service_fn;
 use tracing::{debug, info};
 
-/// Map a ConnectionError to an appropriate io::ErrorKind.
+/// Map a `ConnectionError` to an appropriate `io::ErrorKind`.
 fn connection_error_to_io(e: ConnectionError) -> std::io::Error {
     use std::io::ErrorKind;
     let kind = match &e {
         ConnectionError::VersionMismatch => ErrorKind::Unsupported,
         ConnectionError::TransportError(_) => ErrorKind::InvalidData,
         ConnectionError::ConnectionClosed(_) => ErrorKind::ConnectionAborted,
-        ConnectionError::ApplicationClosed(_) => ErrorKind::ConnectionReset,
-        ConnectionError::Reset => ErrorKind::ConnectionReset,
+        ConnectionError::ApplicationClosed(_) | ConnectionError::Reset => {
+            ErrorKind::ConnectionReset
+        }
         ConnectionError::TimedOut => ErrorKind::TimedOut,
         ConnectionError::LocallyClosed => ErrorKind::NotConnected,
         ConnectionError::CidsExhausted => ErrorKind::Other,
@@ -53,7 +54,7 @@ fn connection_error_to_io(e: ConnectionError) -> std::io::Error {
     std::io::Error::new(kind, e)
 }
 
-/// Map a ConnectingError to an appropriate io::Error.
+/// Map a `ConnectingError` to an appropriate `io::Error`.
 fn connecting_error_to_io(e: ConnectingError) -> std::io::Error {
     use std::io::ErrorKind;
     match e {
@@ -153,6 +154,7 @@ impl ConnectBuilder {
     ///
     /// Note: This wraps the connection with `tokio::time::timeout`.
     /// Iroh does not expose connect timeout configuration natively.
+    #[must_use]
     pub fn connect_timeout(mut self, timeout: Duration) -> Self {
         self.connect_timeout = Some(timeout);
         self
@@ -165,6 +167,7 @@ impl ConnectBuilder {
     ///
     /// **Warning**: Modifying transport config may affect the ability
     /// to establish and maintain direct connections. Test carefully.
+    #[must_use]
     pub fn transport_config(mut self, config: QuicTransportConfig) -> Self {
         self.transport_config = Some(config);
         self
@@ -204,6 +207,7 @@ impl IntoFuture for ConnectBuilder {
 /// # Ok(())
 /// # }
 /// ```
+#[must_use]
 pub fn connect_alpn(
     endpoint: &iroh::Endpoint,
     target: EndpointAddr,
@@ -224,7 +228,7 @@ async fn connect_impl(
     if let Some(timeout) = connect_timeout {
         tokio::time::timeout(timeout, connect_future)
             .await
-            .map_err(|_| Error::connection(format!("connection timed out after {:?}", timeout)))?
+            .map_err(|_| Error::connection(format!("connection timed out after {timeout:?}")))?
     } else {
         connect_future.await
     }

@@ -85,6 +85,11 @@ examples:
 	@echo "Building echo example..."
 	cd examples/echo && cargo build
 
+# Run echo example (DHT discovery e2e test)
+run-echo:
+	@echo "Running echo example (DHT discovery)..."
+	cd examples/echo && cargo run
+
 # Build examples in release mode
 examples-release:
 	@echo "Building chat example (release)..."

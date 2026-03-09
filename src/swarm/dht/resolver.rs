@@ -5,7 +5,8 @@ use std::sync::Arc;
 use mainline::Dht;
 use tracing::{debug, trace, warn};
 
-use crate::swarm::record::ServiceRecord;
+use crate::swarm::record::{ServiceBucket, SignedServiceAd};
+use crate::{Error, Result};
 
 use super::{derive_salt, derive_signing_key};
 
@@ -17,43 +18,80 @@ pub struct DhtResolver {
 
 impl DhtResolver {
     /// Create a new resolver wrapping a shared DHT client.
+    #[must_use]
     pub fn new(dht: Arc<Dht>) -> Self {
         Self { dht }
     }
 
-    /// Query a specific minute slot for a service ALPN.
-    pub async fn query_minute(&self, alpn: &[u8], minute: u64) -> Option<ServiceRecord> {
-        let signing_key = derive_signing_key(alpn, minute);
+    /// Query a specific shard bucket for a service ALPN and minute.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the DHT query task panics.
+    pub async fn query_shard(
+        &self,
+        alpn: &[u8],
+        minute: u64,
+        shard: u8,
+    ) -> Result<Vec<SignedServiceAd>> {
+        let signing_key = derive_signing_key(alpn, minute, shard);
         let public_key = signing_key.verifying_key();
         let pk_bytes = *public_key.as_bytes();
-        let salt = derive_salt(alpn, minute);
+        let salt = derive_salt(alpn, minute, shard);
         let dht = Arc::clone(&self.dht);
         let alpn_owned = alpn.to_vec();
 
-        trace!(alpn = %String::from_utf8_lossy(&alpn_owned), minute, "Querying DHT");
+        trace!(
+            alpn = %String::from_utf8_lossy(&alpn_owned),
+            minute,
+            shard,
+            "Querying DHT shard"
+        );
 
         let result = tokio::task::spawn_blocking(move || {
-            dht.get_mutable_most_recent(&pk_bytes, Some(&salt))
+            dht.get_mutable(&pk_bytes, Some(salt.as_slice()), None)
+                .collect::<Vec<_>>()
         })
         .await
-        .ok()
-        .flatten();
+        .map_err(|e| {
+            Error::dht_discovery(format!(
+                "DHT shard query task failed for alpn={} minute={minute} shard={shard}: {e}",
+                String::from_utf8_lossy(&alpn_owned)
+            ))
+        })?;
 
-        match result {
-            Some(item) => match postcard::from_bytes::<ServiceRecord>(item.value()) {
-                Ok(record) => {
-                    debug!(alpn = %String::from_utf8_lossy(&alpn_owned), minute, "Found DHT record");
-                    Some(record)
-                }
-                Err(e) => {
-                    warn!(alpn = %String::from_utf8_lossy(&alpn_owned), error = %e, "Failed to deserialize DHT record");
-                    None
-                }
-            },
-            None => {
-                trace!(alpn = %String::from_utf8_lossy(&alpn_owned), minute, "No DHT record found");
-                None
-            }
-        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        let buckets = result
+            .into_iter()
+            .filter_map(
+                |item| match postcard::from_bytes::<ServiceBucket>(item.value()) {
+                    Ok(bucket) => Some(bucket),
+                    Err(e) => {
+                        warn!(
+                            alpn = %String::from_utf8_lossy(&alpn_owned),
+                            minute,
+                            shard,
+                            error = %e,
+                            "Failed to deserialize DHT shard bucket"
+                        );
+                        None
+                    }
+                },
+            )
+            .collect::<Vec<_>>();
+
+        let ads = ServiceBucket::merge_valid(buckets, &alpn_owned, minute, shard, now);
+        debug!(
+            alpn = %String::from_utf8_lossy(&alpn_owned),
+            minute,
+            shard,
+            ads = ads.len(),
+            "Resolved DHT shard"
+        );
+        Ok(ads)
     }
 }

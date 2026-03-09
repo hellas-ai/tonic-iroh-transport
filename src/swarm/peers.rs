@@ -2,7 +2,7 @@
 
 use std::{pin::Pin, sync::Arc, time::Duration};
 
-use futures_util::{Stream, StreamExt};
+use futures_util::{stream, Stream, StreamExt};
 use iroh::address_lookup::mdns::{DiscoveryEvent, MdnsAddressLookup};
 use iroh::EndpointId;
 use mainline::Dht;
@@ -10,10 +10,10 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::{BroadcastStream, IntervalStream};
 use tracing::{debug, trace};
 
-use crate::user_data::user_data_has_alpn;
+use crate::user_data::{classify_user_data_alpn, UserDataAlpnMatch};
 use crate::Result;
 
-use super::dht::{resolver::DhtResolver, unix_minute};
+use super::dht::{resolver::DhtResolver, unix_minute, DHT_QUERY_CONCURRENCY, DHT_SHARD_COUNT};
 use super::discovery::DiscoveredPeer;
 
 /// Scope for feed applicability.
@@ -43,6 +43,7 @@ pub struct PeerFeedSpec {
 pub type PeerFeed = Pin<Box<dyn Stream<Item = Result<DiscoveredPeer>> + Send>>;
 
 /// Build a finite feed from static peers.
+#[must_use]
 pub fn static_feed(peers: Vec<EndpointId>, priority: u8, trust: u8, scope: Scope) -> PeerFeedSpec {
     let peer_trust = trust;
     let stream = futures_util::stream::iter(peers.into_iter().map(move |id| {
@@ -62,6 +63,7 @@ pub fn static_feed(peers: Vec<EndpointId>, priority: u8, trust: u8, scope: Scope
 }
 
 /// Build an mDNS feed scoped to a service ALPN.
+#[must_use]
 pub fn mdns_feed(
     mdns: Arc<MdnsAddressLookup>,
     alpn: Vec<u8>,
@@ -75,9 +77,14 @@ pub fn mdns_feed(
         while let Some(event) = sub.next().await {
             if let DiscoveryEvent::Discovered { endpoint_info, .. } = event {
                 let node_id = endpoint_info.endpoint_id;
-                if let Some(user_data) = endpoint_info.data.user_data() {
-                    if !user_data_has_alpn(user_data, &alpn) {
+                match classify_user_data_alpn(endpoint_info.data.user_data(), &alpn) {
+                    UserDataAlpnMatch::Match => {}
+                    UserDataAlpnMatch::Mismatch => {
                         trace!(alpn = %String::from_utf8_lossy(&alpn), "mdns: ALPN mismatch, skipping");
+                        continue;
+                    }
+                    UserDataAlpnMatch::Missing => {
+                        trace!(alpn = %String::from_utf8_lossy(&alpn), "mdns: missing service metadata, skipping");
                         continue;
                     }
                 }
@@ -97,6 +104,7 @@ pub fn mdns_feed(
 }
 
 /// Build a DHT feed (initial burst + periodic poll) for a service ALPN.
+#[must_use]
 pub fn dht_feed(
     dht: Arc<Dht>,
     alpn: Vec<u8>,
@@ -114,14 +122,32 @@ pub fn dht_feed(
     let burst = async_stream::try_stream! {
         for offset in [0i64, -1] {
             let minute = unix_minute(offset);
-            if let Some(record) = burst_resolver.query_minute(&burst_alpn, minute).await {
-                if !required.is_empty() && !record.has_tags(&required) {
-                    trace!("Skipping DHT record (tags mismatch)");
-                    continue;
+            let queries = stream::iter(0..DHT_SHARD_COUNT)
+                .map({
+                    let resolver = burst_resolver.clone();
+                    let alpn = burst_alpn.clone();
+                    move |shard| {
+                        let resolver = resolver.clone();
+                        let alpn = alpn.clone();
+                        async move { resolver.query_shard(&alpn, minute, shard).await }
+                    }
+                })
+                .buffer_unordered(DHT_QUERY_CONCURRENCY);
+
+            futures_util::pin_mut!(queries);
+            while let Some(ads) = queries.next().await {
+                let ads = ads?;
+                for ad in ads {
+                    if !required.is_empty() && !ad.has_tags(&required) {
+                        trace!("Skipping DHT record (tags mismatch)");
+                        continue;
+                    }
+                    let Some(id) = ad.endpoint_id() else {
+                        continue;
+                    };
+                    debug!(%id, source = "dht", "discovered peer");
+                    yield DiscoveredPeer { id, trust: peer_trust };
                 }
-                let id = record.endpoint_id();
-                debug!(%id, source = "dht", "discovered peer");
-                yield DiscoveredPeer { id, trust: peer_trust };
             }
         }
     };
@@ -135,11 +161,29 @@ pub fn dht_feed(
         let _ = interval.next().await;
         while interval.next().await.is_some() {
             let minute = unix_minute(0);
-            if let Some(record) = poll_resolver.query_minute(&poll_alpn, minute).await {
-                if !required_poll.is_empty() && !record.has_tags(&required_poll) {
-                    continue;
+            let queries = stream::iter(0..DHT_SHARD_COUNT)
+                .map({
+                    let resolver = poll_resolver.clone();
+                    let alpn = poll_alpn.clone();
+                    move |shard| {
+                        let resolver = resolver.clone();
+                        let alpn = alpn.clone();
+                        async move { resolver.query_shard(&alpn, minute, shard).await }
+                    }
+                })
+                .buffer_unordered(DHT_QUERY_CONCURRENCY);
+
+            futures_util::pin_mut!(queries);
+            while let Some(ads) = queries.next().await {
+                let ads = ads?;
+                for ad in ads {
+                    if !required_poll.is_empty() && !ad.has_tags(&required_poll) {
+                        continue;
+                    }
+                    if let Some(id) = ad.endpoint_id() {
+                        yield DiscoveredPeer { id, trust: peer_trust };
+                    }
                 }
-                yield DiscoveredPeer { id: record.endpoint_id(), trust: peer_trust };
             }
         }
     };
@@ -156,6 +200,7 @@ pub fn dht_feed(
 }
 
 /// Build a peer-exchange feed backed by a broadcast channel.
+#[must_use]
 pub fn peer_exchange_feed(
     rx: broadcast::Receiver<EndpointId>,
     priority: u8,
@@ -181,6 +226,7 @@ pub fn peer_exchange_feed(
 }
 
 /// Check if a scope applies to an ALPN.
+#[must_use]
 pub fn scope_matches(scope: &Scope, alpn: &[u8]) -> bool {
     match scope {
         Scope::Any => true,

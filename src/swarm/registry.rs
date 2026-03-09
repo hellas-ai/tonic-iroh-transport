@@ -1,4 +1,4 @@
-//! ServiceRegistry: owns pluggable discovery backends and builds locators.
+//! `ServiceRegistry`: owns pluggable discovery backends and builds locators.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,6 +23,7 @@ pub struct ServiceRegistry {
 
 impl ServiceRegistry {
     /// Create an empty registry with no backends.
+    #[must_use]
     pub fn new(endpoint: &Endpoint) -> Self {
         Self {
             endpoint: endpoint.clone(),
@@ -43,6 +44,7 @@ impl ServiceRegistry {
     }
 
     /// Access the endpoint.
+    #[must_use]
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
     }
@@ -55,6 +57,7 @@ impl ServiceRegistry {
     }
 
     /// Build a locator builder for racing connections.
+    #[must_use]
     pub fn find<S: NamedService + Send + 'static>(&self) -> LocatorBuilder<'_, S> {
         LocatorBuilder::new(self)
     }
@@ -87,30 +90,35 @@ where
     }
 
     /// Maximum simultaneous connection attempts.
+    #[must_use]
     pub fn max_inflight(mut self, n: usize) -> Self {
         self.locator_cfg.max_inflight = n;
         self
     }
 
     /// Timeout for each individual attempt.
+    #[must_use]
     pub fn timeout_each(mut self, d: Duration) -> Self {
         self.locator_cfg.timeout_each = d;
         self
     }
 
     /// Overall timeout for the locator.
+    #[must_use]
     pub fn timeout(mut self, d: Duration) -> Self {
         self.locator_cfg.timeout = Some(d);
         self
     }
 
     /// Buffer size for successful connections.
+    #[must_use]
     pub fn limit(mut self, n: usize) -> Self {
         self.locator_cfg.limit = n;
         self
     }
 
     /// Start the locator and return its handle.
+    #[must_use]
     pub fn start(self) -> Locator {
         let alpn = service_to_alpn::<S>();
         let feeds = self.registry.build_feeds(&alpn);
@@ -119,6 +127,10 @@ where
     }
 
     /// Convenience: return the first successful channel.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no peer could be reached.
     pub async fn first(self) -> crate::Result<Channel> {
         self.start().first().await
     }

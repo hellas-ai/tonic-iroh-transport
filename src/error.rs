@@ -31,6 +31,10 @@ pub enum Error {
     #[error("Connection error: {0}")]
     Connection(String),
 
+    /// Address lookup metadata error.
+    #[error("Address lookup metadata error: {0}")]
+    AddressLookupMetadata(String),
+
     /// DHT discovery error.
     #[cfg(feature = "discovery")]
     #[error("DHT discovery error: {0}")]
@@ -41,6 +45,11 @@ impl Error {
     /// Create a connection error.
     pub fn connection<S: Into<String>>(msg: S) -> Self {
         Self::Connection(msg.into())
+    }
+
+    /// Create an address-lookup metadata error.
+    pub fn address_lookup_metadata<S: Into<String>>(msg: S) -> Self {
+        Self::AddressLookupMetadata(msg.into())
     }
 
     /// Create a DHT discovery error.

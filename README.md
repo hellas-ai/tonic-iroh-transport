@@ -218,6 +218,11 @@ let channel = EchoServiceServer::<EchoServiceImpl>::connect(&client_endpoint, se
 
 ### 7. Swarm discovery and racing connects
 
+The DHT backend is a bootstrap mechanism, not a trust anchor. Advertisements are
+signed by the advertising iroh node ID, so peers cannot forge each other's ads,
+but the shared DHT buckets are still globally writable and can be spammed or
+overwritten.
+
 ```rust
 use tonic_iroh_transport::swarm::{ServiceRegistry, DhtBackend};
 use futures::StreamExt;

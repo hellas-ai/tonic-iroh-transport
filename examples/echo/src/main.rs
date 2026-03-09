@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::Result;
 use pb::echo::v1::{
     echo_service_client::EchoServiceClient,
@@ -5,8 +7,9 @@ use pb::echo::v1::{
     EchoRequest, EchoResponse,
 };
 use tonic::{Request, Response, Status};
-use tonic_iroh_transport::iroh::{self, EndpointAddr};
-use tonic_iroh_transport::{IrohConnect, IrohContext, TransportBuilder};
+use tonic_iroh_transport::iroh;
+use tonic_iroh_transport::swarm::{DhtBackend, DhtPublisherConfig, ServiceRegistry};
+use tonic_iroh_transport::{IrohContext, TransportBuilder};
 use tracing::info;
 
 // Generated protobuf code
@@ -19,7 +22,6 @@ struct EchoServiceImpl;
 #[tonic::async_trait]
 impl EchoService for EchoServiceImpl {
     async fn echo(&self, request: Request<EchoRequest>) -> Result<Response<EchoResponse>, Status> {
-        // Extract peer info from connection
         let context = request.extensions().get::<IrohContext>().cloned();
         let peer_id = context
             .map(|ctx| ctx.node_id.to_string())
@@ -39,46 +41,48 @@ impl EchoService for EchoServiceImpl {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    // Create server endpoint
+    // --- Server ---
     let server_endpoint = iroh::Endpoint::builder().bind().await?;
-    let server_node_id = server_endpoint.id();
+    info!("Server Node ID: {}", server_endpoint.id());
 
-    info!("Server Node ID: {}", server_node_id);
-    info!(
-        "Server Local addresses: {:?}",
-        server_endpoint.bound_sockets()
-    );
+    let dht = DhtBackend::new(&server_endpoint)?;
+    let publisher = dht.create_publisher(DhtPublisherConfig {
+        tags: vec![],
+        publish_interval: Duration::from_secs(5),
+    });
 
-    // Start the RPC server with the echo service using the unified transport.
     let rpc_guard = TransportBuilder::new(server_endpoint.clone())
+        .with_publisher(publisher)
         .add_rpc(EchoServiceServer::new(EchoServiceImpl))
         .spawn()
         .await?;
 
-    // Give the server a moment to start up
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    info!("Server started, publishing to DHT...");
 
-    // Create client endpoint
+    // Wait for DHT publish to propagate
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    // --- Client ---
     let client_endpoint = iroh::Endpoint::builder().bind().await?;
     info!("Client Node ID: {}", client_endpoint.id());
 
-    // Connect to the server
-    let server_addr = {
-        let addrs = server_endpoint.bound_sockets();
-        let mut addr = EndpointAddr::new(server_node_id);
-        for a in addrs {
-            addr = addr.with_ip_addr(a);
-        }
-        addr
-    };
+    let client_dht = DhtBackend::new(&client_endpoint)?.poll_interval(Duration::from_secs(5));
 
-    info!("Connecting to server at: {:?}", server_addr);
+    let mut registry = ServiceRegistry::new(&client_endpoint);
+    registry.add(client_dht);
 
-    let channel =
-        EchoServiceServer::<EchoServiceImpl>::connect(&client_endpoint, server_addr).await?;
+    info!("Discovering echo service via DHT...");
+
+    let channel = registry
+        .find::<EchoServiceServer<EchoServiceImpl>>()
+        .timeout(Duration::from_secs(60))
+        .first()
+        .await?;
+
+    info!("Discovered and connected to echo service via DHT!");
+
     let mut client = EchoServiceClient::new(channel);
 
-    // Test a few echo calls
     let messages = vec![
         "Hello, World!",
         "This is a test message",
@@ -95,14 +99,12 @@ async fn main() -> Result<()> {
         let resp = response.into_inner();
 
         info!(
-            "✅ Echo response: '{}' from peer: {}",
+            "Echo response: '{}' from peer: {}",
             resp.message, resp.peer_id
         );
     }
 
     info!("Echo demo completed successfully!");
-
-    // Shutdown
     rpc_guard.shutdown().await?;
 
     Ok(())

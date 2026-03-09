@@ -9,7 +9,7 @@ use std::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tonic::transport::server::Connected;
 
-/// Convert a QUIC write error to an appropriate io::Error.
+/// Convert a QUIC write error to an appropriate `io::Error`.
 fn write_error_to_io(e: WriteError) -> std::io::Error {
     let kind = match &e {
         WriteError::Stopped(_) => ErrorKind::BrokenPipe,
@@ -44,7 +44,8 @@ pub struct IrohStream {
 impl Unpin for IrohStream {}
 
 impl IrohStream {
-    /// Creates a new IrohStream from send/recv streams and context
+    /// Creates a new `IrohStream` from send/recv streams and context
+    #[must_use]
     pub fn new(
         send: iroh::endpoint::SendStream,
         recv: iroh::endpoint::RecvStream,

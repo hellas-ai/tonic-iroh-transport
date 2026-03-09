@@ -53,3 +53,7 @@ jobs:
     
     - name: Build examples
       run: make examples
+
+    - name: Run echo example (DHT discovery e2e)
+      run: cd examples/echo && cargo run
+      timeout-minutes: 3

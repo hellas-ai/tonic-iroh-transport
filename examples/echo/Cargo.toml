@@ -8,7 +8,7 @@ name = "echo"
 path = "src/main.rs"
 
 [dependencies]
-tonic-iroh-transport = { path = "../.." }
+tonic-iroh-transport = { path = "../..", features = ["discovery"] }
 tonic = { version = "0.14" }
 tonic-prost = "0.14"
 prost = "0.14"
