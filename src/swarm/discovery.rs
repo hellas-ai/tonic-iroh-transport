@@ -22,41 +22,46 @@ pub struct DiscoveredPeer {
 pub struct Peer {
     id: EndpointId,
     source: &'static str,
-    peer_trust: u8,
+    remote_trust: u8,
     source_trust: u8,
 }
 
 impl Peer {
-    pub(crate) fn new(discovered: DiscoveredPeer, source: &'static str, source_trust: u8) -> Self {
+    pub(crate) fn new(discovered: &DiscoveredPeer, source: &'static str, source_trust: u8) -> Self {
         Self {
             id: discovered.id,
             source,
-            peer_trust: discovered.trust,
+            remote_trust: discovered.trust,
             source_trust,
         }
     }
 
     /// The peer's endpoint identifier.
+    #[must_use] 
     pub fn id(&self) -> EndpointId {
         self.id
     }
 
-    /// Effective trust: min(peer_trust, source_trust).
+    /// Effective trust: `min(remote_trust, source_trust)`.
+    #[must_use] 
     pub fn trust(&self) -> u8 {
-        self.peer_trust.min(self.source_trust)
+        self.remote_trust.min(self.source_trust)
     }
 
     /// Name of the discovery source that found this peer.
+    #[must_use] 
     pub fn source(&self) -> &str {
         self.source
     }
 
     /// Raw peer-level trust before source adjustment.
-    pub fn peer_trust(&self) -> u8 {
-        self.peer_trust
+    #[must_use] 
+    pub fn remote_trust(&self) -> u8 {
+        self.remote_trust
     }
 
     /// Trust level of the source/producer that discovered this peer.
+    #[must_use] 
     pub fn source_trust(&self) -> u8 {
         self.source_trust
     }
@@ -93,6 +98,7 @@ pub struct MdnsBackend {
 
 impl MdnsBackend {
     /// Create an mDNS backend wrapping the given discovery instance.
+    #[must_use] 
     pub fn new(mdns: MdnsAddressLookup) -> Self {
         Self {
             mdns: Arc::new(mdns),
@@ -102,12 +108,14 @@ impl MdnsBackend {
     }
 
     /// Set the feed priority (lower = polled first). Default: 50.
+    #[must_use] 
     pub fn priority(mut self, p: u8) -> Self {
         self.priority = p;
         self
     }
 
     /// Set the source trust level (0-255). Default: 200.
+    #[must_use] 
     pub fn trust(mut self, t: u8) -> Self {
         self.trust = t;
         self
@@ -146,11 +154,13 @@ pub struct StaticBackend {
 
 impl StaticBackend {
     /// Create an empty static backend.
+    #[must_use] 
     pub fn new() -> Self {
         Self { specs: Vec::new() }
     }
 
     /// Add a group of static peers.
+    #[must_use]
     pub fn add_peers<I>(mut self, scope: Scope, priority: u8, trust: u8, peers: I) -> Self
     where
         I: IntoIterator<Item = EndpointId>,
@@ -202,6 +212,7 @@ pub struct PeerExchangeBackend {
 
 impl PeerExchangeBackend {
     /// Create a new peer-exchange backend.
+    #[must_use] 
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(128);
         Self {
@@ -212,12 +223,14 @@ impl PeerExchangeBackend {
     }
 
     /// Set the feed priority (lower = polled first). Default: 110.
+    #[must_use] 
     pub fn priority(mut self, p: u8) -> Self {
         self.priority = p;
         self
     }
 
     /// Set the source trust level (0-255). Default: 100.
+    #[must_use] 
     pub fn trust(mut self, t: u8) -> Self {
         self.trust = t;
         self

@@ -12,7 +12,7 @@ use crate::Result;
 use super::discovery::Peer;
 use super::peers::{scope_matches, PeerFeed, PeerFeedSpec};
 
-/// A tagged feed: wraps a PeerFeed to attach source metadata to each item.
+/// A tagged feed: wraps a `PeerFeed` to attach source metadata to each item.
 struct TaggedFeed {
     name: &'static str,
     trust: u8,
@@ -26,7 +26,7 @@ impl Stream for TaggedFeed {
         let this = self.get_mut();
         match Pin::new(&mut this.inner).poll_next(cx) {
             Poll::Ready(Some(Ok(discovered))) => {
-                let peer = Peer::new(discovered, this.name, this.trust);
+                let peer = Peer::new(&discovered, this.name, this.trust);
                 Poll::Ready(Some(Ok(peer)))
             }
             Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e))),
@@ -47,10 +47,11 @@ pub struct SwarmEngine {
 
 impl SwarmEngine {
     /// Build an engine for a specific ALPN using the provided feed specs.
+    #[must_use] 
     pub fn new(local_id: EndpointId, alpn: &[u8], mut feeds: Vec<PeerFeedSpec>) -> Self {
         let mut inner = SelectAll::new();
         feeds.sort_by_key(|f| f.priority);
-        for spec in feeds.into_iter() {
+        for spec in feeds {
             if !scope_matches(&spec.scope, alpn) {
                 continue;
             }

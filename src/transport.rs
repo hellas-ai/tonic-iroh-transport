@@ -12,7 +12,7 @@ use tonic::transport::Server;
 
 use crate::alpn::service_to_alpn;
 use crate::error::Result;
-use crate::server::{GrpcProtocolHandler, IrohIncoming};
+use crate::server::{GrpcProtocolHandler, IrohIncoming, DEFAULT_INCOMING_BUFFER_CAPACITY};
 use crate::user_data::encode_alpns;
 
 #[cfg(feature = "discovery")]
@@ -23,7 +23,7 @@ trait AddService: Send {
     fn register(
         self: Box<Self>,
         router: RouterBuilder,
-        sender: tokio::sync::mpsc::UnboundedSender<
+        sender: tokio::sync::mpsc::Sender<
             std::result::Result<crate::stream::IrohStream, std::io::Error>,
         >,
         tonic_router: Option<TonicRouter>,
@@ -44,7 +44,7 @@ where
     fn register(
         self: Box<Self>,
         router: RouterBuilder,
-        sender: tokio::sync::mpsc::UnboundedSender<
+        sender: tokio::sync::mpsc::Sender<
             std::result::Result<crate::stream::IrohStream, std::io::Error>,
         >,
         tonic_router: Option<TonicRouter>,
@@ -68,17 +68,20 @@ pub struct TransportBuilder {
     endpoint: Endpoint,
     services: Vec<Box<dyn AddService>>,
     alpns: Vec<Vec<u8>>,
+    incoming_buffer_capacity: usize,
     #[cfg(feature = "discovery")]
     publisher: Option<DhtPublisher>,
 }
 
 impl TransportBuilder {
     /// Create a new builder for an endpoint.
+    #[must_use] 
     pub fn new(endpoint: Endpoint) -> Self {
         Self {
             endpoint,
             services: Vec::new(),
             alpns: Vec::new(),
+            incoming_buffer_capacity: DEFAULT_INCOMING_BUFFER_CAPACITY,
             #[cfg(feature = "discovery")]
             publisher: None,
         }
@@ -86,12 +89,14 @@ impl TransportBuilder {
 
     /// Enable DHT publishing with a pre-configured publisher.
     #[cfg(feature = "discovery")]
+    #[must_use] 
     pub fn with_publisher(mut self, publisher: DhtPublisher) -> Self {
         self.publisher = Some(publisher);
         self
     }
 
     /// Add a tonic RPC service.
+    #[must_use]
     pub fn add_rpc<S>(mut self, service: S) -> Self
     where
         S: NamedService
@@ -109,44 +114,59 @@ impl TransportBuilder {
         self
     }
 
+    /// Set the maximum number of accepted RPC streams buffered for tonic.
+    ///
+    /// When the queue is full, newly accepted streams are rejected immediately
+    /// instead of being buffered unboundedly in memory.
+    #[must_use] 
+    pub fn incoming_buffer_capacity(mut self, capacity: usize) -> Self {
+        self.incoming_buffer_capacity = capacity.max(1);
+        self
+    }
+
     /// Spawn the transport (router, tonic server).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if ALPN metadata encoding fails or the router cannot be built.
+    #[allow(clippy::unused_async)]
     pub async fn spawn(self) -> Result<TransportGuard> {
         let (shutdown_tx, _) = broadcast::channel(1);
-        let (incoming, sender) = IrohIncoming::new();
+        let (incoming, sender) = IrohIncoming::new(self.incoming_buffer_capacity);
         let mut builder = Router::builder(self.endpoint.clone());
         let mut tonic_router: Option<TonicRouter> = None;
 
-        for svc in self.services.into_iter() {
+        for svc in self.services {
             let (b, tr) = svc.register(builder, sender.clone(), tonic_router);
             builder = b;
             tonic_router = Some(tr);
         }
 
         if !self.alpns.is_empty() {
-            let user_data = encode_alpns(&self.alpns);
+            let user_data = encode_alpns(&self.alpns)?;
             self.endpoint
                 .set_user_data_for_address_lookup(Some(user_data));
         }
 
         // Start DHT publisher if one was provided
-        #[cfg(feature = "discovery")]
-        let dht_publisher = if let Some(mut publisher) = self.publisher {
-            for alpn in &self.alpns {
-                publisher.add_service(alpn.clone());
-            }
-            publisher.start(shutdown_tx.subscribe());
-            Some(publisher)
-        } else {
-            None
-        };
-
         let router = builder.spawn();
 
         let mut driver = JoinSet::new();
 
+        #[cfg(feature = "discovery")]
+        if let Some(mut publisher) = self.publisher {
+            for alpn in &self.alpns {
+                publisher.add_service(alpn.clone());
+            }
+
+            let shutdown_rx = shutdown_tx.subscribe();
+            driver.spawn(async move {
+                publisher.run(shutdown_rx).await;
+            });
+        }
+
         if let Some(tr) = tonic_router {
             let mut shutdown_rx = shutdown_tx.subscribe();
-            let incoming = incoming;
             driver.spawn(async move {
                 let shutdown_fut = async move {
                     let _ = shutdown_rx.recv().await;
@@ -173,8 +193,6 @@ impl TransportBuilder {
             shutdown_tx,
             driver: driver_handle,
             router,
-            #[cfg(feature = "discovery")]
-            dht_publisher,
         })
     }
 }
@@ -185,34 +203,38 @@ pub struct TransportGuard {
     shutdown_tx: broadcast::Sender<()>,
     driver: tokio::task::JoinHandle<()>,
     router: Router,
-    #[cfg(feature = "discovery")]
-    dht_publisher: Option<DhtPublisher>,
 }
 
 impl TransportGuard {
     /// Access the endpoint.
+    #[must_use] 
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
     }
 
     /// Access the router handle.
-    pub fn router(&self) -> Option<&Router> {
-        Some(&self.router)
+    #[must_use] 
+    pub fn router(&self) -> &Router {
+        &self.router
     }
 
     /// Graceful shutdown of tonic and router.
-    #[allow(unused_mut)]
-    pub async fn shutdown(mut self) -> Result<()> {
-        let _ = self.shutdown_tx.send(());
-        let _ = self.driver.await;
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the router shutdown fails.
+    pub async fn shutdown(self) -> Result<()> {
+        let TransportGuard {
+            shutdown_tx,
+            driver,
+            router,
+            ..
+        } = self;
 
-        // Stop DHT publisher if running
-        #[cfg(feature = "discovery")]
-        if let Some(ref mut publisher) = self.dht_publisher {
-            publisher.stop().await;
-        }
+        let _ = shutdown_tx.send(());
+        let _ = driver.await;
 
-        if let Err(e) = self.router.shutdown().await {
+        if let Err(e) = router.shutdown().await {
             tracing::warn!("router shutdown error: {e}");
         }
 

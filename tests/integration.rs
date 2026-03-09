@@ -142,6 +142,66 @@ async fn test_rpc_server_lifecycle() {
     guard.shutdown().await.unwrap();
 }
 
+#[tokio::test]
+async fn test_rpc_shutdown_closes_live_service_connection() {
+    use axum::body::Body as AxumBody;
+    use axum::response::Response;
+    use std::convert::Infallible;
+    use std::{future::Ready, task::Poll};
+    use tonic::body::Body;
+
+    #[derive(Clone)]
+    struct DummyRpc;
+    impl tonic::server::NamedService for DummyRpc {
+        const NAME: &'static str = "test.Service";
+    }
+    impl tower::Service<http::Request<Body>> for DummyRpc {
+        type Response = Response<AxumBody>;
+        type Error = Infallible;
+        type Future = Ready<Result<Self::Response, Self::Error>>;
+
+        fn poll_ready(
+            &mut self,
+            _cx: &mut std::task::Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _req: http::Request<Body>) -> Self::Future {
+            std::future::ready(Ok(Response::new(AxumBody::empty())))
+        }
+    }
+
+    let server_endpoint = local_endpoint().await;
+    let guard = TransportBuilder::new(server_endpoint.clone())
+        .add_rpc(DummyRpc)
+        .spawn()
+        .await
+        .unwrap();
+
+    let client_endpoint = local_endpoint().await;
+    let server_addr = EndpointAddr::new(server_endpoint.id())
+        .with_addrs(to_localhost_addrs(server_endpoint.bound_sockets()));
+    let conn = timeout(
+        Duration::from_secs(5),
+        client_endpoint.connect(server_addr, b"/test.Service/1.0"),
+    )
+    .await
+    .expect("connection timed out")
+    .expect("connection failed");
+
+    timeout(Duration::from_secs(5), guard.shutdown())
+        .await
+        .expect("shutdown timed out")
+        .expect("shutdown failed");
+
+    let open_result = timeout(Duration::from_secs(1), conn.open_bi()).await;
+    assert!(
+        matches!(open_result, Ok(Err(_)) | Err(_)),
+        "connection remained usable after server shutdown"
+    );
+}
+
 #[test_log::test(tokio::test)]
 async fn test_connect_timeout_builtin() {
     // Test using the built-in connect_timeout on ConnectBuilder

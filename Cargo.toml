@@ -26,7 +26,9 @@ client = [
 ]
 server = [
     "dep:axum",
+    "dep:data-encoding",
     "dep:http",
+    "dep:postcard",
     "dep:tokio",
     "dep:tokio-stream",
     "dep:tower",
@@ -38,6 +40,7 @@ server = [
 discovery = [
     "client",
     "dep:tokio-stream",
+    "dep:data-encoding",
     "iroh/address-lookup-mdns",
     "iroh/address-lookup-pkarr-dht",
     "dep:mainline",
@@ -60,6 +63,7 @@ thiserror = { version = "2.0", default-features = false }
 tracing = { version = "0.1", default-features = false }
 bytes = { version = "1.8", default-features = false }
 axum = { version = "0.8", default-features = false, optional = true }
+data-encoding = { version = "2.9", default-features = false, optional = true }
 
 # Mainline DHT discovery dependencies (optional)
 mainline = { version = "6", optional = true }
@@ -74,12 +78,14 @@ tracing-subscriber = "0.3"
 anyhow = "1.0"
 async-trait = "0.1"
 test-log = "0.2"
-cargo-release = "0.25"
 
 # Example dependencies
 clap = { version = "4.5", features = ["derive"] }
 prost = "0.14"
 tokio-stream = "0.1"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
 
 [build-dependencies]
 tonic-prost-build = "0.14"
