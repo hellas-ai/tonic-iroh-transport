@@ -41,7 +41,7 @@ impl DhtBackend {
     }
 
     /// Create a DHT backend with an existing DHT client.
-    #[must_use] 
+    #[must_use]
     pub fn with_dht(endpoint: &Endpoint, dht: Arc<Dht>) -> Self {
         Self {
             endpoint: endpoint.clone(),
@@ -54,41 +54,41 @@ impl DhtBackend {
     }
 
     /// Set the feed priority (lower = polled first). Default: 100.
-    #[must_use] 
+    #[must_use]
     pub fn priority(mut self, p: u8) -> Self {
         self.priority = p;
         self
     }
 
     /// Set the source trust level (0-255). Default: 50.
-    #[must_use] 
+    #[must_use]
     pub fn trust(mut self, t: u8) -> Self {
         self.trust = t;
         self
     }
 
     /// Set the DHT poll interval. Default: 60s.
-    #[must_use] 
+    #[must_use]
     pub fn poll_interval(mut self, d: Duration) -> Self {
         self.poll_interval = d;
         self
     }
 
     /// Set required tags for filtering DHT records.
-    #[must_use] 
+    #[must_use]
     pub fn required_tags(mut self, tags: Vec<String>) -> Self {
         self.required_tags = tags;
         self
     }
 
     /// Access the underlying DHT client.
-    #[must_use] 
+    #[must_use]
     pub fn dht(&self) -> &Arc<Dht> {
         &self.dht
     }
 
     /// Create a DHT publisher for server-side announcements.
-    #[must_use] 
+    #[must_use]
     pub fn create_publisher(&self, config: DhtPublisherConfig) -> DhtPublisher {
         DhtPublisher::new(
             Arc::clone(&self.dht),

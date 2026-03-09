@@ -41,7 +41,7 @@ pub struct DhtPublisher {
 
 impl DhtPublisher {
     /// Create a publisher for a given DHT client and node ID.
-    #[must_use] 
+    #[must_use]
     pub fn new(dht: Arc<Dht>, secret_key: SecretKey, config: DhtPublisherConfig) -> Self {
         Self {
             dht,

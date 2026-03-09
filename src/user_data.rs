@@ -57,21 +57,21 @@ pub(crate) fn classify_user_data_alpn(
 
 /// Check if `user_data` contains the ALPN for a specific tonic service.
 #[cfg(feature = "server")]
-#[must_use] 
+#[must_use]
 pub fn user_data_has_service<S: tonic::server::NamedService>(user_data: &UserData) -> bool {
     let target = service_to_alpn::<S>();
     decode_alpns(user_data).iter().any(|alpn| alpn == &target)
 }
 
 /// Check if `user_data` contains a specific ALPN.
-#[must_use] 
+#[must_use]
 pub fn user_data_has_alpn(user_data: &UserData, alpn: &[u8]) -> bool {
     decode_alpns(user_data).iter().any(|a| a == alpn)
 }
 
 /// Get all ALPNs from `user_data`.
 #[cfg(feature = "server")]
-#[must_use] 
+#[must_use]
 pub fn user_data_alpns(user_data: &UserData) -> Vec<Vec<u8>> {
     decode_alpns(user_data)
 }

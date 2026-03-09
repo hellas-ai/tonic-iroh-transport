@@ -75,7 +75,7 @@ pub struct TransportBuilder {
 
 impl TransportBuilder {
     /// Create a new builder for an endpoint.
-    #[must_use] 
+    #[must_use]
     pub fn new(endpoint: Endpoint) -> Self {
         Self {
             endpoint,
@@ -89,7 +89,7 @@ impl TransportBuilder {
 
     /// Enable DHT publishing with a pre-configured publisher.
     #[cfg(feature = "discovery")]
-    #[must_use] 
+    #[must_use]
     pub fn with_publisher(mut self, publisher: DhtPublisher) -> Self {
         self.publisher = Some(publisher);
         self
@@ -118,7 +118,7 @@ impl TransportBuilder {
     ///
     /// When the queue is full, newly accepted streams are rejected immediately
     /// instead of being buffered unboundedly in memory.
-    #[must_use] 
+    #[must_use]
     pub fn incoming_buffer_capacity(mut self, capacity: usize) -> Self {
         self.incoming_buffer_capacity = capacity.max(1);
         self
@@ -207,13 +207,13 @@ pub struct TransportGuard {
 
 impl TransportGuard {
     /// Access the endpoint.
-    #[must_use] 
+    #[must_use]
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
     }
 
     /// Access the router handle.
-    #[must_use] 
+    #[must_use]
     pub fn router(&self) -> &Router {
         &self.router
     }

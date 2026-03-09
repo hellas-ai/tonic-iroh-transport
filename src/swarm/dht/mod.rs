@@ -21,7 +21,7 @@ pub(crate) const DHT_AD_TTL_SECS: u64 = 120;
 pub(crate) const DHT_QUERY_CONCURRENCY: usize = 4;
 
 /// Derive the shared shard signing key from service ALPN, unix minute, and shard index.
-#[must_use] 
+#[must_use]
 pub fn derive_signing_key(alpn: &[u8], unix_minute: u64, shard: u8) -> mainline::SigningKey {
     let mut hasher = Sha256::new();
     hasher.update(b"tonic-iroh-transport:dht:key:v2:");
@@ -33,7 +33,7 @@ pub fn derive_signing_key(alpn: &[u8], unix_minute: u64, shard: u8) -> mainline:
 }
 
 /// Derive salt for a service shard bucket.
-#[must_use] 
+#[must_use]
 pub fn derive_salt(alpn: &[u8], unix_minute: u64, shard: u8) -> Vec<u8> {
     let mut hasher = Sha256::new();
     hasher.update(b"tonic-iroh-transport:dht:salt:v2:");
@@ -44,7 +44,7 @@ pub fn derive_salt(alpn: &[u8], unix_minute: u64, shard: u8) -> Vec<u8> {
 }
 
 /// Deterministically choose the shards this node should publish into for a service.
-#[must_use] 
+#[must_use]
 pub fn replica_shards(node_id: &[u8; 32], alpn: &[u8]) -> Vec<u8> {
     replica_shards_with_limits(node_id, alpn, DHT_SHARD_COUNT, DHT_REPLICA_COUNT)
 }

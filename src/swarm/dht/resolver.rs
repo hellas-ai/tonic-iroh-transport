@@ -18,7 +18,7 @@ pub struct DhtResolver {
 
 impl DhtResolver {
     /// Create a new resolver wrapping a shared DHT client.
-    #[must_use] 
+    #[must_use]
     pub fn new(dht: Arc<Dht>) -> Self {
         Self { dht }
     }

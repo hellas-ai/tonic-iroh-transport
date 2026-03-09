@@ -47,7 +47,7 @@ pub struct SwarmEngine {
 
 impl SwarmEngine {
     /// Build an engine for a specific ALPN using the provided feed specs.
-    #[must_use] 
+    #[must_use]
     pub fn new(local_id: EndpointId, alpn: &[u8], mut feeds: Vec<PeerFeedSpec>) -> Self {
         let mut inner = SelectAll::new();
         feeds.sort_by_key(|f| f.priority);

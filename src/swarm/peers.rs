@@ -43,7 +43,7 @@ pub struct PeerFeedSpec {
 pub type PeerFeed = Pin<Box<dyn Stream<Item = Result<DiscoveredPeer>> + Send>>;
 
 /// Build a finite feed from static peers.
-#[must_use] 
+#[must_use]
 pub fn static_feed(peers: Vec<EndpointId>, priority: u8, trust: u8, scope: Scope) -> PeerFeedSpec {
     let peer_trust = trust;
     let stream = futures_util::stream::iter(peers.into_iter().map(move |id| {
@@ -63,7 +63,7 @@ pub fn static_feed(peers: Vec<EndpointId>, priority: u8, trust: u8, scope: Scope
 }
 
 /// Build an mDNS feed scoped to a service ALPN.
-#[must_use] 
+#[must_use]
 pub fn mdns_feed(
     mdns: Arc<MdnsAddressLookup>,
     alpn: Vec<u8>,
@@ -104,7 +104,7 @@ pub fn mdns_feed(
 }
 
 /// Build a DHT feed (initial burst + periodic poll) for a service ALPN.
-#[must_use] 
+#[must_use]
 pub fn dht_feed(
     dht: Arc<Dht>,
     alpn: Vec<u8>,
@@ -200,7 +200,7 @@ pub fn dht_feed(
 }
 
 /// Build a peer-exchange feed backed by a broadcast channel.
-#[must_use] 
+#[must_use]
 pub fn peer_exchange_feed(
     rx: broadcast::Receiver<EndpointId>,
     priority: u8,
@@ -226,7 +226,7 @@ pub fn peer_exchange_feed(
 }
 
 /// Check if a scope applies to an ALPN.
-#[must_use] 
+#[must_use]
 pub fn scope_matches(scope: &Scope, alpn: &[u8]) -> bool {
     match scope {
         Scope::Any => true,

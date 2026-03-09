@@ -154,7 +154,7 @@ impl ConnectBuilder {
     ///
     /// Note: This wraps the connection with `tokio::time::timeout`.
     /// Iroh does not expose connect timeout configuration natively.
-    #[must_use] 
+    #[must_use]
     pub fn connect_timeout(mut self, timeout: Duration) -> Self {
         self.connect_timeout = Some(timeout);
         self
@@ -167,7 +167,7 @@ impl ConnectBuilder {
     ///
     /// **Warning**: Modifying transport config may affect the ability
     /// to establish and maintain direct connections. Test carefully.
-    #[must_use] 
+    #[must_use]
     pub fn transport_config(mut self, config: QuicTransportConfig) -> Self {
         self.transport_config = Some(config);
         self
@@ -207,7 +207,7 @@ impl IntoFuture for ConnectBuilder {
 /// # Ok(())
 /// # }
 /// ```
-#[must_use] 
+#[must_use]
 pub fn connect_alpn(
     endpoint: &iroh::Endpoint,
     target: EndpointAddr,

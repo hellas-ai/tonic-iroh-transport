@@ -45,7 +45,7 @@ impl Unpin for IrohStream {}
 
 impl IrohStream {
     /// Creates a new `IrohStream` from send/recv streams and context
-    #[must_use] 
+    #[must_use]
     pub fn new(
         send: iroh::endpoint::SendStream,
         recv: iroh::endpoint::RecvStream,
