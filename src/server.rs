@@ -76,10 +76,14 @@ impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
 
         async move {
             let remote_node_id = connection.remote_id();
+            let stats = connection.stats();
 
             info!(
-                "Accepting gRPC connection for service '{}' from peer: {}",
-                service_name, remote_node_id
+                service = %service_name,
+                peer_id = %remote_node_id,
+                udp_tx_bytes = stats.udp_tx.bytes,
+                udp_rx_bytes = stats.udp_rx.bytes,
+                "accepting gRPC connection"
             );
 
             loop {

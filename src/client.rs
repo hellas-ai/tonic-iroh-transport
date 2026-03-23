@@ -8,10 +8,10 @@
 //! ```rust,no_run
 //! use tonic_iroh_transport::IrohConnect;
 //! use std::time::Duration;
-//! # use tonic_iroh_transport::iroh::{Endpoint, EndpointAddr};
+//! # use tonic_iroh_transport::iroh::{Endpoint, EndpointAddr, endpoint::presets};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! # let endpoint = Endpoint::builder().bind().await?;
+//! # let endpoint = Endpoint::bind(presets::N0).await?;
 //! # let target = EndpointAddr::new(endpoint.id());
 //! // Simple connection
 //! // let channel = EchoServer::<_>::connect(&endpoint, target).await?;
@@ -27,11 +27,12 @@
 use std::future::{Future, IntoFuture};
 use std::pin::Pin;
 use std::time::Duration;
+use std::time::Instant;
 
 use crate::{alpn::service_to_alpn, stream::IrohStream, Error, Result};
 use http::Uri;
 use hyper_util::rt::TokioIo;
-use iroh::endpoint::{ConnectingError, ConnectionError, QuicTransportConfig};
+use iroh::endpoint::{ConnectingError, ConnectionError, PathId, QuicTransportConfig};
 use iroh::EndpointAddr;
 use tonic::transport::{Channel, Endpoint};
 use tower::service_fn;
@@ -76,10 +77,10 @@ fn connecting_error_to_io(e: ConnectingError) -> std::io::Error {
 ///
 /// ```rust,no_run
 /// use tonic_iroh_transport::IrohConnect;
-/// # use tonic_iroh_transport::iroh::{Endpoint, EndpointAddr};
+/// # use tonic_iroh_transport::iroh::{Endpoint, EndpointAddr, endpoint::presets};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// # let endpoint = Endpoint::builder().bind().await?;
+/// # let endpoint = Endpoint::bind(presets::N0).await?;
 /// # let target = EndpointAddr::new(endpoint.id());
 /// // Connect to a service - the ALPN is derived from the service type
 /// // let channel = EchoServer::<_>::connect(&endpoint, target).await?;
@@ -113,10 +114,10 @@ impl<T: tonic::server::NamedService> IrohConnect for T {
 /// ```rust,no_run
 /// use tonic_iroh_transport::IrohConnect;
 /// use std::time::Duration;
-/// # use tonic_iroh_transport::iroh::{Endpoint, EndpointAddr};
+/// # use tonic_iroh_transport::iroh::{Endpoint, EndpointAddr, endpoint::presets};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// # let endpoint = Endpoint::builder().bind().await?;
+/// # let endpoint = Endpoint::bind(presets::N0).await?;
 /// # let target = EndpointAddr::new(endpoint.id());
 /// // Await directly for simple case
 /// // let channel = EchoServer::<_>::connect(&endpoint, target).await?;
@@ -198,10 +199,10 @@ impl IntoFuture for ConnectBuilder {
 ///
 /// ```rust,no_run
 /// use tonic_iroh_transport::connect_alpn;
-/// # use tonic_iroh_transport::iroh::{Endpoint, EndpointAddr};
+/// # use tonic_iroh_transport::iroh::{Endpoint, EndpointAddr, endpoint::presets};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// # let endpoint = Endpoint::builder().bind().await?;
+/// # let endpoint = Endpoint::bind(presets::N0).await?;
 /// # let target = EndpointAddr::new(endpoint.id());
 /// let channel = connect_alpn(&endpoint, target, b"/my.custom.Service/1.0").await?;
 /// # Ok(())
@@ -223,15 +224,25 @@ async fn connect_impl(
     connect_timeout: Option<Duration>,
     transport_config: Option<QuicTransportConfig>,
 ) -> Result<Channel> {
+    let start = Instant::now();
+    let target_id = target.id;
     let connect_future = connect_inner(endpoint, target, alpn, transport_config);
 
-    if let Some(timeout) = connect_timeout {
+    let channel = if let Some(timeout) = connect_timeout {
         tokio::time::timeout(timeout, connect_future)
             .await
             .map_err(|_| Error::connection(format!("connection timed out after {timeout:?}")))?
     } else {
         connect_future.await
-    }
+    }?;
+
+    debug!(
+        peer_id = %target_id,
+        connect_timeout_ms = connect_timeout.map(|timeout| timeout.as_millis()),
+        total_connect_ms = start.elapsed().as_millis(),
+        "iroh tonic connect completed"
+    );
+    Ok(channel)
 }
 
 async fn connect_inner(
@@ -240,7 +251,8 @@ async fn connect_inner(
     alpn: Vec<u8>,
     transport_config: Option<QuicTransportConfig>,
 ) -> Result<Channel> {
-    debug!("Connecting to peer: {}", target.id);
+    let start = Instant::now();
+    debug!(peer_id = %target.id, "connecting to peer");
 
     let target_id = target.id;
 
@@ -251,11 +263,13 @@ async fn connect_inner(
             let target = target.clone();
             let alpn = alpn.clone();
             let transport_config = transport_config.clone();
+            let connector_start = Instant::now();
 
             async move {
-                info!("Establishing iroh connection to {}", target.id);
+                info!(peer_id = %target.id, "establishing iroh connection");
 
                 // Connect to the peer using iroh
+                let connection_start = Instant::now();
                 let connection = if let Some(config) = transport_config {
                     let opts = iroh::endpoint::ConnectOptions::new().with_transport_config(config);
                     let connecting = endpoint
@@ -272,24 +286,51 @@ async fn connect_inner(
                         std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e)
                     })?
                 };
+                let rtt_ms = connection.rtt(PathId::ZERO).map(|rtt| rtt.as_millis());
+                let stats = connection.stats();
+                debug!(
+                    peer_id = %target.id,
+                    rtt_ms = rtt_ms,
+                    udp_tx_bytes = stats.udp_tx.bytes,
+                    udp_rx_bytes = stats.udp_rx.bytes,
+                    connect_ms = connection_start.elapsed().as_millis(),
+                    connector_elapsed_ms = connector_start.elapsed().as_millis(),
+                    "iroh connection established"
+                );
 
                 // Open a bidirectional stream for this gRPC call
+                let open_stream_start = Instant::now();
                 let (send, recv) = connection.open_bi().await.map_err(connection_error_to_io)?;
+                debug!(
+                    peer_id = %target.id,
+                    open_stream_ms = open_stream_start.elapsed().as_millis(),
+                    connector_elapsed_ms = connector_start.elapsed().as_millis(),
+                    "iroh bidirectional stream opened"
+                );
 
                 // Create the stream with context
                 let context = crate::stream::IrohContext {
                     node_id: target_id,
                     connection: connection.clone(),
-                    established_at: std::time::Instant::now(),
+                    established_at: Instant::now(),
                     alpn,
                 };
 
                 let stream = IrohStream::new(send, recv, context);
+                debug!(
+                    peer_id = %target.id,
+                    connector_elapsed_ms = connector_start.elapsed().as_millis(),
+                    "iroh connector returned stream"
+                );
                 Ok::<_, std::io::Error>(TokioIo::new(stream))
             }
         }))
         .await?;
 
-    info!("Successfully connected to peer: {}", target_id);
+    info!(
+        peer_id = %target_id,
+        connect_inner_ms = start.elapsed().as_millis(),
+        "successfully connected to peer"
+    );
     Ok(channel)
 }

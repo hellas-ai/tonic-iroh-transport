@@ -55,7 +55,7 @@ cargo run --bin client -- \
 
 ```rust
 // Server: Multiple services registered with TransportBuilder
-let endpoint = iroh::Endpoint::builder().bind().await?;
+let endpoint = iroh::Endpoint::bind(iroh::endpoint::presets::N0).await?;
 
 let _guard = TransportBuilder::new(endpoint.clone())
     .add_rpc(P2pChatServiceServer::new(chat_service))

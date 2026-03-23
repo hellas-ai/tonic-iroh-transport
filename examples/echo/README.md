@@ -28,7 +28,7 @@ cargo run --bin client <NODE_ID>
 
 ```rust
 // Server setup
-let endpoint = iroh::Endpoint::builder().bind().await?;
+let endpoint = iroh::Endpoint::bind(iroh::endpoint::presets::N0).await?;
 let _guard = TransportBuilder::new(endpoint)
     .add_rpc(EchoServiceServer::new(EchoServiceImpl))
     .spawn()
@@ -37,7 +37,7 @@ let _guard = TransportBuilder::new(endpoint)
 // Client usage
 use tonic_iroh_transport::IrohConnect;
 
-let endpoint = iroh::Endpoint::builder().bind().await?;
+let endpoint = iroh::Endpoint::bind(iroh::endpoint::presets::N0).await?;
 let channel = EchoServiceServer::<EchoServiceImpl>::connect(&endpoint, server_addr).await?;
 let mut client = EchoServiceClient::new(channel);
 let response = client.echo(request).await?;
