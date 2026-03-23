@@ -32,7 +32,7 @@ use std::time::Instant;
 use crate::{alpn::service_to_alpn, stream::IrohStream, Error, Result};
 use http::Uri;
 use hyper_util::rt::TokioIo;
-use iroh::endpoint::{ConnectingError, ConnectionError, PathId, QuicTransportConfig};
+use iroh::endpoint::{ConnectingError, ConnectionError, QuicTransportConfig};
 use iroh::EndpointAddr;
 use tonic::transport::{Channel, Endpoint};
 use tower::service_fn;
@@ -263,13 +263,11 @@ async fn connect_inner(
             let target = target.clone();
             let alpn = alpn.clone();
             let transport_config = transport_config.clone();
-            let connector_start = Instant::now();
 
             async move {
                 info!(peer_id = %target.id, "establishing iroh connection");
 
                 // Connect to the peer using iroh
-                let connection_start = Instant::now();
                 let connection = if let Some(config) = transport_config {
                     let opts = iroh::endpoint::ConnectOptions::new().with_transport_config(config);
                     let connecting = endpoint
@@ -286,27 +284,8 @@ async fn connect_inner(
                         std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e)
                     })?
                 };
-                let rtt_ms = connection.rtt(PathId::ZERO).map(|rtt| rtt.as_millis());
-                let stats = connection.stats();
-                debug!(
-                    peer_id = %target.id,
-                    rtt_ms = rtt_ms,
-                    udp_tx_bytes = stats.udp_tx.bytes,
-                    udp_rx_bytes = stats.udp_rx.bytes,
-                    connect_ms = connection_start.elapsed().as_millis(),
-                    connector_elapsed_ms = connector_start.elapsed().as_millis(),
-                    "iroh connection established"
-                );
-
                 // Open a bidirectional stream for this gRPC call
-                let open_stream_start = Instant::now();
                 let (send, recv) = connection.open_bi().await.map_err(connection_error_to_io)?;
-                debug!(
-                    peer_id = %target.id,
-                    open_stream_ms = open_stream_start.elapsed().as_millis(),
-                    connector_elapsed_ms = connector_start.elapsed().as_millis(),
-                    "iroh bidirectional stream opened"
-                );
 
                 // Create the stream with context
                 let context = crate::stream::IrohContext {
@@ -317,11 +296,6 @@ async fn connect_inner(
                 };
 
                 let stream = IrohStream::new(send, recv, context);
-                debug!(
-                    peer_id = %target.id,
-                    connector_elapsed_ms = connector_start.elapsed().as_millis(),
-                    "iroh connector returned stream"
-                );
                 Ok::<_, std::io::Error>(TokioIo::new(stream))
             }
         }))

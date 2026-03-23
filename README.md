@@ -43,9 +43,9 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 # Default features are `client` + `server`.
-tonic-iroh-transport = "0.4"
+tonic-iroh-transport = "0.5"
 # If you use the swarm APIs in section 7, enable `discovery`:
-# tonic-iroh-transport = { version = "0.4", features = ["discovery"] }
+# tonic-iroh-transport = { version = "0.5", features = ["discovery"] }
 tonic = "0.14"
 tonic-prost = "0.14"
 prost = "0.14"
@@ -63,7 +63,7 @@ If you want a smaller build, disable defaults and opt into only what you need:
 
 ```toml
 # client-only
-tonic-iroh-transport = { version = "0.4", default-features = false, features = ["client"] }
+tonic-iroh-transport = { version = "0.5", default-features = false, features = ["client"] }
 ```
 
 ### 2. Protocol Definition
