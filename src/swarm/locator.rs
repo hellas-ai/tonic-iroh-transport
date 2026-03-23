@@ -8,7 +8,7 @@ use std::{
 };
 
 use futures_util::{future::BoxFuture, stream::FuturesUnordered, Stream, StreamExt};
-use iroh::{Endpoint, EndpointAddr};
+use iroh::Endpoint;
 use tokio::{sync::mpsc, task::JoinHandle, time};
 use tonic::server::NamedService;
 use tonic::transport::Channel;
@@ -16,7 +16,7 @@ use tonic::transport::Channel;
 use tracing::debug;
 
 use super::discovery::Peer;
-use crate::{IrohConnect, Result};
+use crate::{ConnectionPool, PoolOptions, Result};
 
 /// Configuration for connection racing.
 #[derive(Clone, Debug)]
@@ -78,8 +78,28 @@ impl Locator {
         S: NamedService + Send + 'static,
         St: Stream<Item = Result<Peer>> + Send + 'static,
     {
+        let pool = ConnectionPool::for_service::<S>(
+            endpoint,
+            PoolOptions {
+                connect_timeout: opts.timeout_each,
+                ..PoolOptions::default()
+            },
+        );
+        Self::spawn_with_pool::<S, St>(pool, peers, opts)
+    }
+
+    /// Spawn a locator over a stream of peers using a shared connection pool.
+    pub(crate) fn spawn_with_pool<S, St>(
+        pool: ConnectionPool,
+        peers: St,
+        opts: LocatorConfig,
+    ) -> Locator
+    where
+        S: NamedService + Send + 'static,
+        St: Stream<Item = Result<Peer>> + Send + 'static,
+    {
         let (tx, rx) = mpsc::channel::<Result<Channel>>(opts.limit);
-        let mut state = LocatorState::<S, St>::new(endpoint, peers, opts, tx);
+        let mut state = LocatorState::<S, St>::new(pool, peers, opts, tx);
 
         let task = tokio::spawn(async move {
             state.run().await;
@@ -109,7 +129,7 @@ where
     S: NamedService + Send + 'static,
     St: Stream<Item = Result<Peer>> + Send + 'static,
 {
-    endpoint: Endpoint,
+    pool: ConnectionPool,
     peers: Pin<Box<St>>,
     inflight: FuturesUnordered<BoxFuture<'static, Result<Channel>>>,
     stream_exhausted: bool,
@@ -124,13 +144,13 @@ where
     St: Stream<Item = Result<Peer>> + Send + 'static,
 {
     fn new(
-        endpoint: Endpoint,
+        pool: ConnectionPool,
         peers: St,
         opts: LocatorConfig,
         tx: mpsc::Sender<Result<Channel>>,
     ) -> Self {
         Self {
-            endpoint,
+            pool,
             peers: Box::pin(peers),
             inflight: FuturesUnordered::new(),
             stream_exhausted: false,
@@ -197,13 +217,18 @@ where
     }
 
     fn push_attempt(&mut self, peer: &Peer) {
-        let ep = self.endpoint.clone();
+        let pool = self.pool.clone();
         let timeout = self.opts.timeout_each;
         let node_id = peer.id();
 
         let fut: BoxFuture<'static, Result<Channel>> = Box::pin(async move {
-            let builder = S::connect(&ep, EndpointAddr::new(node_id)).connect_timeout(timeout);
-            builder.await
+            // The pool timeout covers iroh connection establishment; this outer
+            // timeout also bounds post-connect stream/channel setup.
+            time::timeout(timeout, pool.channel(node_id))
+                .await
+                .map_err(|_| {
+                    crate::Error::connection(format!("connection timed out after {timeout:?}"))
+                })?
         });
         self.inflight.push(fut);
     }

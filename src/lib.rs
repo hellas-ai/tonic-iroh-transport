@@ -61,6 +61,8 @@ mod alpn;
 #[cfg(feature = "client")]
 pub mod client;
 pub mod error;
+#[cfg(feature = "client")]
+pub mod pool;
 #[cfg(feature = "server")]
 pub(crate) mod server;
 #[cfg(any(feature = "client", feature = "server"))]
@@ -77,6 +79,8 @@ pub mod swarm;
 #[cfg(feature = "client")]
 pub use client::{connect_alpn, ConnectBuilder, IrohConnect};
 pub use error::{Error, Result};
+#[cfg(feature = "client")]
+pub use pool::{ConnectionPool, ConnectionRef, PoolError, PoolOptions};
 #[cfg(any(feature = "client", feature = "server"))]
 pub use stream::{IrohContext, IrohStream};
 

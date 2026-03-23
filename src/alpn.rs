@@ -18,20 +18,19 @@ mod tests {
         const NAME: &'static str = "test.Service";
     }
 
+    struct EchoService;
+    impl tonic::server::NamedService for EchoService {
+        const NAME: &'static str = "echo.Echo";
+    }
+
+    struct ChatService;
+    impl tonic::server::NamedService for ChatService {
+        const NAME: &'static str = "p2p_chat.P2PChatService";
+    }
+
     #[test]
     fn test_alpn_generation() {
         assert_eq!(service_to_alpn::<MockService>(), b"/test.Service/1.0");
-
-        struct EchoService;
-        impl tonic::server::NamedService for EchoService {
-            const NAME: &'static str = "echo.Echo";
-        }
-
-        struct ChatService;
-        impl tonic::server::NamedService for ChatService {
-            const NAME: &'static str = "p2p_chat.P2PChatService";
-        }
-
         assert_eq!(service_to_alpn::<EchoService>(), b"/echo.Echo/1.0");
         assert_eq!(
             service_to_alpn::<ChatService>(),
