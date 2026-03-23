@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 use std::time::Duration;
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout, Instant};
 use tonic_iroh_transport::iroh::{
     address_lookup::memory::MemoryLookup,
     endpoint::Connection,
@@ -10,7 +10,7 @@ use tonic_iroh_transport::iroh::{
 #[cfg(feature = "discovery")]
 use tonic_iroh_transport::swarm::{peers::Scope, ServiceRegistry, StaticBackend};
 use tonic_iroh_transport::{
-    ConnectionPool, IrohConnect, IrohStream, PoolOptions, TransportBuilder,
+    ConnectionPool, ConnectionRef, IrohConnect, IrohStream, PoolOptions, TransportBuilder,
 };
 
 /// Create a local-only endpoint with relays and discovery disabled for testing.
@@ -47,6 +47,61 @@ fn to_localhost_addrs(addrs: Vec<SocketAddr>) -> impl Iterator<Item = TransportA
 
 fn endpoint_addr(endpoint: &Endpoint) -> EndpointAddr {
     EndpointAddr::new(endpoint.id()).with_addrs(to_localhost_addrs(endpoint.bound_sockets()))
+}
+
+async fn wait_for_replacement_connection(
+    pool: &ConnectionPool,
+    peer_id: EndpointId,
+    previous_stable_id: usize,
+    idle_timeout: Duration,
+) -> ConnectionRef {
+    let deadline = Instant::now() + Duration::from_secs(1);
+    sleep(idle_timeout).await;
+
+    loop {
+        let conn = pool
+            .get_or_connect(peer_id)
+            .await
+            .expect("reconnect after idle timeout failed");
+        if conn.stable_id() != previous_stable_id {
+            return conn;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "idle timeout should retire the old connection within 1s"
+        );
+        drop(conn);
+        sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[cfg(feature = "discovery")]
+async fn wait_for_shared_connection(
+    pool: &ConnectionPool,
+    peer_id: EndpointId,
+    expected_stable_id: usize,
+    idle_timeout: Duration,
+) -> ConnectionRef {
+    let deadline = Instant::now() + Duration::from_secs(1);
+    sleep(idle_timeout).await;
+
+    loop {
+        let conn = pool
+            .get_or_connect(peer_id)
+            .await
+            .expect("shared pool connection should remain alive");
+        if conn.stable_id() == expected_stable_id {
+            return conn;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "locator should keep the shared pooled connection alive"
+        );
+        drop(conn);
+        sleep(Duration::from_millis(10)).await;
+    }
 }
 
 #[cfg(feature = "discovery")]
@@ -257,6 +312,7 @@ async fn test_connect_timeout_builtin() {
 
 #[tokio::test]
 async fn test_connection_pool_reuses_and_reconnects_after_idle() {
+    let idle_timeout = Duration::from_millis(50);
     let address_lookup = MemoryLookup::new();
     let client_endpoint = local_endpoint_with_lookup(address_lookup.clone()).await;
     let server_endpoint = local_endpoint().await;
@@ -270,7 +326,7 @@ async fn test_connection_pool_reuses_and_reconnects_after_idle() {
         client_endpoint,
         b"/test/1.0",
         PoolOptions {
-            idle_timeout: Duration::from_millis(50),
+            idle_timeout,
             connect_timeout: Duration::from_secs(5),
             max_connections: 8,
         },
@@ -298,12 +354,8 @@ async fn test_connection_pool_reuses_and_reconnects_after_idle() {
     drop(conn1);
     drop(conn2);
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    let conn3 = pool
-        .get_or_connect(server_endpoint.id())
-        .await
-        .expect("reconnect after idle timeout failed");
+    let conn3 =
+        wait_for_replacement_connection(&pool, server_endpoint.id(), stable_id, idle_timeout).await;
     assert_ne!(
         stable_id,
         conn3.stable_id(),
@@ -360,6 +412,7 @@ async fn test_connection_ref_survives_pool_drop() {
 #[cfg(feature = "discovery")]
 #[tokio::test]
 async fn test_service_registry_locator_uses_shared_pool() {
+    let idle_timeout = Duration::from_millis(50);
     let address_lookup = MemoryLookup::new();
     let client_endpoint = local_endpoint_with_lookup(address_lookup.clone()).await;
     let server_endpoint = local_endpoint().await;
@@ -373,7 +426,7 @@ async fn test_service_registry_locator_uses_shared_pool() {
 
     let mut registry = ServiceRegistry::new(&client_endpoint);
     registry.with_pool_options(PoolOptions {
-        idle_timeout: Duration::from_millis(50),
+        idle_timeout,
         connect_timeout: Duration::from_secs(2),
         max_connections: 8,
     });
@@ -387,20 +440,14 @@ async fn test_service_registry_locator_uses_shared_pool() {
     let stable_id = conn1.stable_id();
     drop(conn1);
 
-    tokio::time::sleep(Duration::from_millis(10)).await;
-
     let _channel = registry
         .find::<TestRpc>()
         .first()
         .await
         .expect("locator should connect through the shared pool");
 
-    tokio::time::sleep(Duration::from_millis(75)).await;
-
-    let conn2 = pool
-        .get_or_connect(server_endpoint.id())
-        .await
-        .expect("shared pool connection should remain alive");
+    let conn2 =
+        wait_for_shared_connection(&pool, server_endpoint.id(), stable_id, idle_timeout).await;
     assert_eq!(
         stable_id,
         conn2.stable_id(),

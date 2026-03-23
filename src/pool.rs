@@ -325,6 +325,7 @@ impl Ctx {
     async fn run_connection(
         self: Arc<Self>,
         pool_tx: mpsc::Sender<Msg>,
+        shutdown: Arc<Shutdown>,
         actor_tx: mpsc::Sender<RequestMsg>,
         node_id: EndpointId,
         generation: u64,
@@ -359,12 +360,21 @@ impl Ctx {
         let idle_sleep = tokio::time::sleep(Duration::from_secs(0));
         tokio::pin!(idle_sleep);
         let mut idle_active = false;
+        let mut shutdown_pending = shutdown.is_closed();
 
         loop {
             let notified = counter.inner.notify.notified();
+            let shutdown_wait = shutdown.notify.notified();
 
             tokio::select! {
                 biased;
+
+                () = shutdown_wait, if !shutdown_pending => {
+                    shutdown_pending = true;
+                    if counter.is_idle() {
+                        break;
+                    }
+                }
 
                 () = async {
                     if let Some(conn) = &connection {
@@ -425,6 +435,10 @@ impl Ctx {
                 () = notified, if connection.is_some() => {
                     if !counter.is_idle() {
                         continue;
+                    }
+
+                    if shutdown_pending {
+                        break;
                     }
 
                     trace!(%node_id, generation, "all refs dropped, starting idle timer");
@@ -536,7 +550,7 @@ impl PoolActor {
         false
     }
 
-    async fn handle(&mut self, pool_tx: &mpsc::Sender<Msg>, msg: Msg) {
+    async fn handle(&mut self, pool_tx: &mpsc::Sender<Msg>, shutdown: &Arc<Shutdown>, msg: Msg) {
         match msg {
             Msg::Request(mut req) => {
                 let id = req.id;
@@ -576,9 +590,10 @@ impl PoolActor {
 
                 let ctx = Arc::clone(&self.ctx);
                 let pool_tx = pool_tx.clone();
+                let shutdown = Arc::clone(shutdown);
                 let actor_tx = conn_tx.clone();
                 self.tasks.push(Box::pin(async move {
-                    ctx.run_connection(pool_tx, actor_tx, id, generation, conn_rx)
+                    ctx.run_connection(pool_tx, shutdown, actor_tx, id, generation, conn_rx)
                         .await;
                 }));
 
@@ -611,7 +626,7 @@ impl PoolActor {
                 () = shutdown_wait => break,
                 msg = self.rx.recv() => {
                     match msg {
-                        Some(msg) => self.handle(&pool_tx, msg).await,
+                        Some(msg) => self.handle(&pool_tx, &shutdown, msg).await,
                         None => break,
                     }
                 }
