@@ -1,6 +1,7 @@
 //! `ServiceRegistry`: owns pluggable discovery backends and builds locators.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::Stream;
@@ -13,12 +14,21 @@ use super::engine::SwarmEngine;
 use super::locator::{Locator, LocatorConfig};
 use super::peers::PeerFeedSpec;
 use crate::alpn::service_to_alpn;
+use crate::{ConnectionPool, PoolOptions};
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct PoolKey {
+    alpn: Vec<u8>,
+    options: PoolOptions,
+}
 
 /// Unified registry for pluggable peer discovery backends.
 #[derive(Clone)]
 pub struct ServiceRegistry {
     endpoint: Endpoint,
     backends: Vec<Arc<dyn Discovery>>,
+    pool_options: PoolOptions,
+    pools: Arc<Mutex<HashMap<PoolKey, ConnectionPool>>>,
 }
 
 impl ServiceRegistry {
@@ -28,6 +38,8 @@ impl ServiceRegistry {
         Self {
             endpoint: endpoint.clone(),
             backends: Vec::new(),
+            pool_options: PoolOptions::default(),
+            pools: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -40,6 +52,15 @@ impl ServiceRegistry {
     /// Add a pre-wrapped `Arc<dyn Discovery>` backend.
     pub fn add_shared(&mut self, backend: Arc<dyn Discovery>) -> &mut Self {
         self.backends.push(backend);
+        self
+    }
+
+    /// Set default pool options used for service-scoped connection reuse.
+    ///
+    /// Existing cached pools are retained; the new options apply to pools that
+    /// are created after this call.
+    pub fn with_pool_options(&mut self, options: PoolOptions) -> &mut Self {
+        self.pool_options = options;
         self
     }
 
@@ -62,8 +83,30 @@ impl ServiceRegistry {
         LocatorBuilder::new(self)
     }
 
+    /// Get a shared pool for a service ALPN using the registry defaults.
+    #[must_use]
+    pub fn pool<S: NamedService>(&self) -> ConnectionPool {
+        let alpn = service_to_alpn::<S>();
+        self.pool_for_alpn(&alpn, self.pool_options.clone())
+    }
+
     fn build_feeds(&self, alpn: &[u8]) -> Vec<PeerFeedSpec> {
         self.backends.iter().flat_map(|b| b.feeds(alpn)).collect()
+    }
+
+    fn pool_for_alpn(&self, alpn: &[u8], options: PoolOptions) -> ConnectionPool {
+        let key = PoolKey {
+            alpn: alpn.to_vec(),
+            options: options.clone(),
+        };
+        let mut pools = self
+            .pools
+            .lock()
+            .expect("service registry pool cache should not be poisoned");
+        pools
+            .entry(key)
+            .or_insert_with(|| ConnectionPool::new(self.endpoint.clone(), alpn, options))
+            .clone()
     }
 }
 
@@ -74,6 +117,7 @@ where
 {
     registry: &'a ServiceRegistry,
     locator_cfg: LocatorConfig,
+    pool_options: PoolOptions,
     _marker: std::marker::PhantomData<S>,
 }
 
@@ -85,6 +129,7 @@ where
         Self {
             registry,
             locator_cfg: LocatorConfig::default(),
+            pool_options: registry.pool_options.clone(),
             _marker: std::marker::PhantomData,
         }
     }
@@ -100,6 +145,7 @@ where
     #[must_use]
     pub fn timeout_each(mut self, d: Duration) -> Self {
         self.locator_cfg.timeout_each = d;
+        self.pool_options.connect_timeout = d;
         self
     }
 
@@ -117,13 +163,22 @@ where
         self
     }
 
+    /// Override the pool options used for this service locator.
+    #[must_use]
+    pub fn pool_options(mut self, options: PoolOptions) -> Self {
+        self.locator_cfg.timeout_each = options.connect_timeout;
+        self.pool_options = options;
+        self
+    }
+
     /// Start the locator and return its handle.
     #[must_use]
     pub fn start(self) -> Locator {
         let alpn = service_to_alpn::<S>();
         let feeds = self.registry.build_feeds(&alpn);
         let stream = SwarmEngine::new(self.registry.endpoint.id(), &alpn, feeds);
-        Locator::spawn::<S, _>(self.registry.endpoint.clone(), stream, self.locator_cfg)
+        let pool = self.registry.pool_for_alpn(&alpn, self.pool_options);
+        Locator::spawn_with_pool::<S, _>(pool, stream, self.locator_cfg)
     }
 
     /// Convenience: return the first successful channel.

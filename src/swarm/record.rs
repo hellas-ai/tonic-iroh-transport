@@ -333,6 +333,7 @@ mod tests {
                     let key = if idx == 0 {
                         preferred.clone()
                     } else {
+                        #[allow(clippy::cast_possible_truncation)]
                         SecretKey::from([idx as u8; 32])
                     };
                     SignedServiceAd::sign(

@@ -10,7 +10,7 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tonic::transport::server::Connected;
 
 /// Convert a QUIC write error to an appropriate `io::Error`.
-fn write_error_to_io(e: WriteError) -> std::io::Error {
+pub(crate) fn write_error_to_io(e: WriteError) -> std::io::Error {
     let kind = match &e {
         WriteError::Stopped(_) => ErrorKind::BrokenPipe,
         WriteError::ConnectionLost(_) => ErrorKind::ConnectionAborted,

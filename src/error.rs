@@ -39,6 +39,11 @@ pub enum Error {
     #[cfg(feature = "discovery")]
     #[error("DHT discovery error: {0}")]
     DhtDiscovery(String),
+
+    /// Connection pool error.
+    #[cfg(feature = "client")]
+    #[error("Pool error: {0}")]
+    Pool(#[from] crate::pool::PoolError),
 }
 
 impl Error {
