@@ -36,7 +36,7 @@
 //!
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create an endpoint
-//! let endpoint = iroh::Endpoint::builder().bind().await?;
+//! let endpoint = iroh::Endpoint::bind(iroh::endpoint::presets::N0).await?;
 //!
 //! // Build and run the node
 //! let rpc = TransportBuilder::new(endpoint)

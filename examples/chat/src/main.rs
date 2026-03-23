@@ -439,7 +439,12 @@ async fn main() -> Result<()> {
 
     info!("Starting P2P Chat Node");
 
-    let mut endpoint_builder = iroh::Endpoint::builder();
+    let mut endpoint_builder = if args.no_relay {
+        info!("Relay servers disabled - using direct connections only");
+        iroh::Endpoint::builder(iroh::endpoint::presets::N0DisableRelay)
+    } else {
+        iroh::Endpoint::builder(iroh::endpoint::presets::N0)
+    };
 
     if let Some(secret_key) = args.secret_key {
         let secret_key = SecretKey::from_str(&secret_key)?;
@@ -451,12 +456,6 @@ async fn main() -> Result<()> {
             std::net::Ipv4Addr::UNSPECIFIED,
             args.port,
         ))?;
-    }
-
-    if args.no_relay {
-        info!("Relay servers disabled - using direct connections only");
-        // Disable all relay URLs for direct-only mode
-        endpoint_builder = endpoint_builder.relay_mode(iroh::RelayMode::Disabled);
     }
 
     let endpoint = endpoint_builder.bind().await?;

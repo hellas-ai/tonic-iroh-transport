@@ -43,13 +43,13 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 # Default features are `client` + `server`.
-tonic-iroh-transport = "0.3"
+tonic-iroh-transport = "0.5"
 # If you use the swarm APIs in section 7, enable `discovery`:
-# tonic-iroh-transport = { version = "0.3", features = ["discovery"] }
+# tonic-iroh-transport = { version = "0.5", features = ["discovery"] }
 tonic = "0.14"
 tonic-prost = "0.14"
 prost = "0.14"
-iroh = "0.96"
+iroh = "0.97"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
 anyhow = "1.0"
 tracing = "0.1"
@@ -63,7 +63,7 @@ If you want a smaller build, disable defaults and opt into only what you need:
 
 ```toml
 # client-only
-tonic-iroh-transport = { version = "0.3", default-features = false, features = ["client"] }
+tonic-iroh-transport = { version = "0.5", default-features = false, features = ["client"] }
 ```
 
 ### 2. Protocol Definition
@@ -157,7 +157,7 @@ use pb::echo::v1::echo_service_server::EchoServiceServer;
 #[tokio::main]
 async fn main() -> Result<()> {
     // Create iroh endpoint for P2P networking
-    let endpoint = iroh::Endpoint::builder().bind().await?;
+    let endpoint = iroh::Endpoint::bind(iroh::endpoint::presets::N0).await?;
     println!("Server Node ID: {}", endpoint.id());
 
     // Start transport with the Echo service
@@ -187,7 +187,7 @@ use pb::echo::v1::{
 };
 
 // Create client endpoint
-let client_endpoint = iroh::Endpoint::builder().bind().await?;
+let client_endpoint = iroh::Endpoint::bind(iroh::endpoint::presets::N0).await?;
 let server_addr = EndpointAddr::new(server_node_id);
 
 // Connect using the IrohConnect trait

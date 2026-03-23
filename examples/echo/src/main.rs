@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     // --- Server ---
-    let server_endpoint = iroh::Endpoint::builder().bind().await?;
+    let server_endpoint = iroh::Endpoint::bind(iroh::endpoint::presets::N0).await?;
     info!("Server Node ID: {}", server_endpoint.id());
 
     let dht = DhtBackend::new(&server_endpoint)?;
@@ -63,7 +63,7 @@ async fn main() -> Result<()> {
     tokio::time::sleep(Duration::from_secs(5)).await;
 
     // --- Client ---
-    let client_endpoint = iroh::Endpoint::builder().bind().await?;
+    let client_endpoint = iroh::Endpoint::bind(iroh::endpoint::presets::N0).await?;
     info!("Client Node ID: {}", client_endpoint.id());
 
     let client_dht = DhtBackend::new(&client_endpoint)?.poll_interval(Duration::from_secs(5));

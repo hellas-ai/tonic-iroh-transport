@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 pub(crate) const DEFAULT_INCOMING_BUFFER_CAPACITY: usize = 256;
 const OVERLOAD_STREAM_ERROR_CODE: u32 = 1;
@@ -76,11 +76,6 @@ impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
 
         async move {
             let remote_node_id = connection.remote_id();
-
-            info!(
-                "Accepting gRPC connection for service '{}' from peer: {}",
-                service_name, remote_node_id
-            );
 
             loop {
                 // The router already runs each accept future on its own task.

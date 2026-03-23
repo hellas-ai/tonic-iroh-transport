@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::time::timeout;
 use tonic_iroh_transport::iroh::{
-    endpoint::{Connection, RelayMode},
+    endpoint::Connection,
     protocol::{AcceptError, ProtocolHandler, Router},
     Endpoint, EndpointAddr, EndpointId, TransportAddr,
 };
@@ -10,12 +10,7 @@ use tonic_iroh_transport::{IrohConnect, IrohStream, TransportBuilder};
 
 /// Create a local-only endpoint with relays and discovery disabled for testing.
 async fn local_endpoint() -> Endpoint {
-    Endpoint::builder()
-        .relay_mode(RelayMode::Disabled)
-        .clear_address_lookup()
-        .bind()
-        .await
-        .unwrap()
+    Endpoint::empty_builder().bind().await.unwrap()
 }
 
 /// Convert bound socket addresses to localhost addresses for local testing.
