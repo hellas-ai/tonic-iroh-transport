@@ -2,11 +2,12 @@
 
 use std::sync::Arc;
 
+use futures_util::StreamExt;
 use mainline::Dht;
 use tracing::{debug, trace, warn};
 
 use crate::swarm::record::{ServiceBucket, SignedServiceAd};
-use crate::{Error, Result};
+use crate::Result;
 
 use super::{derive_salt, derive_signing_key};
 
@@ -27,7 +28,6 @@ impl DhtResolver {
     ///
     /// # Errors
     ///
-    /// Returns an error if the DHT query task panics.
     pub async fn query_shard(
         &self,
         alpn: &[u8],
@@ -38,7 +38,6 @@ impl DhtResolver {
         let public_key = signing_key.verifying_key();
         let pk_bytes = *public_key.as_bytes();
         let salt = derive_salt(alpn, minute, shard);
-        let dht = Arc::clone(&self.dht);
         let alpn_owned = alpn.to_vec();
 
         trace!(
@@ -48,17 +47,14 @@ impl DhtResolver {
             "Querying DHT shard"
         );
 
-        let result = tokio::task::spawn_blocking(move || {
-            dht.get_mutable(&pk_bytes, Some(salt.as_slice()), None)
-                .collect::<Vec<_>>()
-        })
-        .await
-        .map_err(|e| {
-            Error::dht_discovery(format!(
-                "DHT shard query task failed for alpn={} minute={minute} shard={shard}: {e}",
-                String::from_utf8_lossy(&alpn_owned)
-            ))
-        })?;
+        // Use mainline's async stream directly so dropping discovery cancels
+        // in-flight shard queries instead of waiting for spawn_blocking work to finish.
+        let dht = self.dht.as_ref().clone().as_async();
+        let mut stream = dht.get_mutable(&pk_bytes, Some(salt.as_slice()), None);
+        let mut result = Vec::new();
+        while let Some(item) = stream.next().await {
+            result.push(item);
+        }
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
