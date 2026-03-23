@@ -143,7 +143,7 @@ impl AsyncRead for IrohStream {
                 }
                 Poll::Pending
             }
-            other => other,
+            other @ Poll::Ready(_) => other,
         }
     }
 }
