@@ -5,6 +5,7 @@
 //! - `client`: Outbound connectors (`IrohConnect`, `connect_alpn`).
 //! - `server`: Inbound transport runtime (`TransportBuilder`, `TransportGuard`).
 //! - `discovery`: Peer discovery/swarm support (depends on `client`).
+//! - `otel`: OpenTelemetry trace context propagation interceptors.
 //!
 //! # Example
 //!
@@ -72,6 +73,8 @@ pub mod transport;
 #[cfg(any(feature = "server", feature = "discovery"))]
 mod user_data;
 
+#[cfg(feature = "otel")]
+pub mod otel;
 #[cfg(feature = "discovery")]
 pub mod swarm;
 

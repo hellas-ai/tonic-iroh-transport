@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, warn, Instrument};
 
 pub(crate) const DEFAULT_INCOMING_BUFFER_CAPACITY: usize = 256;
 const OVERLOAD_STREAM_ERROR_CODE: u32 = 1;
@@ -76,52 +76,54 @@ impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
 
         async move {
             let remote_node_id = connection.remote_id();
+            let span = tracing::info_span!(
+                "iroh.accept",
+                peer_id = %remote_node_id,
+                service = %service_name,
+            );
 
-            loop {
-                // The router already runs each accept future on its own task.
-                // Keeping the stream loop in this future lets router shutdown
-                // own the task lifecycle instead of leaving a detached task behind.
-                if let Ok((mut send, mut recv)) = connection.accept_bi().await {
-                    debug!("Accepted new stream for service '{}'", service_name);
+            async {
+                loop {
+                    // The router already runs each accept future on its own task.
+                    // Keeping the stream loop in this future lets router shutdown
+                    // own the task lifecycle instead of leaving a detached task behind.
+                    if let Ok((mut send, mut recv)) = connection.accept_bi().await {
+                        debug!("accepted new stream");
 
-                    match sender.try_reserve() {
-                        Ok(permit) => {
-                            let stream = IrohStream::new(
-                                send,
-                                recv,
-                                IrohContext {
-                                    node_id: remote_node_id,
-                                    connection: connection.clone(),
-                                    established_at: std::time::Instant::now(),
-                                    alpn: connection.alpn().to_vec(),
-                                },
-                            );
-                            permit.send(Ok(stream));
+                        match sender.try_reserve() {
+                            Ok(permit) => {
+                                let stream = IrohStream::new(
+                                    send,
+                                    recv,
+                                    IrohContext {
+                                        node_id: remote_node_id,
+                                        connection: connection.clone(),
+                                        established_at: std::time::Instant::now(),
+                                        alpn: connection.alpn().to_vec(),
+                                    },
+                                );
+                                permit.send(Ok(stream));
+                            }
+                            Err(TrySendError::Full(())) => {
+                                warn!("dropping overloaded stream");
+                                reject_stream(&mut send, &mut recv);
+                            }
+                            Err(TrySendError::Closed(())) => {
+                                error!("channel closed, cannot forward stream");
+                                reject_stream(&mut send, &mut recv);
+                                break;
+                            }
                         }
-                        Err(TrySendError::Full(())) => {
-                            warn!(
-                                "Dropping overloaded stream for service '{}' from peer: {}",
-                                service_name, remote_node_id
-                            );
-                            reject_stream(&mut send, &mut recv);
-                        }
-                        Err(TrySendError::Closed(())) => {
-                            error!(
-                                "Failed to forward stream to handler for service '{}': channel closed",
-                                service_name
-                            );
-                            reject_stream(&mut send, &mut recv);
-                            break;
-                        }
+                    } else {
+                        debug!("connection closed");
+                        break;
                     }
-                } else {
-                    // Connection closed or error
-                    debug!("Connection closed for service '{}'", service_name);
-                    break;
                 }
-            }
 
-            Ok::<(), iroh::protocol::AcceptError>(())
+                Ok::<(), iroh::protocol::AcceptError>(())
+            }
+            .instrument(span)
+            .await
         }
     }
 
