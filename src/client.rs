@@ -36,7 +36,7 @@ use iroh::endpoint::{ConnectingError, ConnectionError, QuicTransportConfig};
 use iroh::EndpointAddr;
 use tonic::transport::{Channel, Endpoint};
 use tower::service_fn;
-use tracing::{debug, info};
+use tracing::{debug, info, Instrument};
 
 /// Map a `ConnectionError` to an appropriate `io::ErrorKind`.
 fn connection_error_to_io(e: ConnectionError) -> std::io::Error {
@@ -224,25 +224,28 @@ async fn connect_impl(
     connect_timeout: Option<Duration>,
     transport_config: Option<QuicTransportConfig>,
 ) -> Result<Channel> {
-    let start = Instant::now();
-    let target_id = target.id;
-    let connect_future = connect_inner(endpoint, target, alpn, transport_config);
-
-    let channel = if let Some(timeout) = connect_timeout {
-        tokio::time::timeout(timeout, connect_future)
-            .await
-            .map_err(|_| Error::connection(format!("connection timed out after {timeout:?}")))?
-    } else {
-        connect_future.await
-    }?;
-
-    debug!(
-        peer_id = %target_id,
-        connect_timeout_ms = connect_timeout.map(|timeout| timeout.as_millis()),
-        total_connect_ms = start.elapsed().as_millis(),
-        "iroh tonic connect completed"
+    let span = tracing::info_span!(
+        "iroh.connect",
+        peer_id = %target.id,
+        alpn = %String::from_utf8_lossy(&alpn),
+        timeout_ms = connect_timeout.map(|t| t.as_millis().try_into().unwrap_or(u64::MAX)),
     );
-    Ok(channel)
+
+    async {
+        let connect_future = connect_inner(endpoint, target, alpn, transport_config);
+
+        let channel = if let Some(timeout) = connect_timeout {
+            tokio::time::timeout(timeout, connect_future)
+                .await
+                .map_err(|_| Error::connection(format!("connection timed out after {timeout:?}")))?
+        } else {
+            connect_future.await
+        }?;
+
+        Ok(channel)
+    }
+    .instrument(span)
+    .await
 }
 
 async fn connect_inner(
@@ -251,10 +254,8 @@ async fn connect_inner(
     alpn: Vec<u8>,
     transport_config: Option<QuicTransportConfig>,
 ) -> Result<Channel> {
-    let start = Instant::now();
-    debug!(peer_id = %target.id, "connecting to peer");
-
     let target_id = target.id;
+    debug!(peer_id = %target_id, "connecting to peer");
 
     // Create a dummy endpoint URI (not used by connector)
     let channel = Endpoint::try_from("http://[::]:50051")?
@@ -274,20 +275,17 @@ async fn connect_inner(
                         .connect_with_opts(target.clone(), &alpn, opts)
                         .await
                         .map_err(|e| {
-                            // Initial connection setup error (node lookup, etc.)
                             std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e)
                         })?;
                     connecting.await.map_err(connecting_error_to_io)?
                 } else {
                     endpoint.connect(target.clone(), &alpn).await.map_err(|e| {
-                        // This could be various errors - use ConnectionRefused as default
                         std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e)
                     })?
                 };
                 // Open a bidirectional stream for this gRPC call
                 let (send, recv) = connection.open_bi().await.map_err(connection_error_to_io)?;
 
-                // Create the stream with context
                 let context = crate::stream::IrohContext {
                     node_id: target_id,
                     connection: connection.clone(),
@@ -301,10 +299,6 @@ async fn connect_inner(
         }))
         .await?;
 
-    info!(
-        peer_id = %target_id,
-        connect_inner_ms = start.elapsed().as_millis(),
-        "successfully connected to peer"
-    );
+    debug!(peer_id = %target_id, "connected to peer");
     Ok(channel)
 }

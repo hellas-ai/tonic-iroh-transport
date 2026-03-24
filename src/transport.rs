@@ -130,6 +130,7 @@ impl TransportBuilder {
     ///
     /// Returns an error if ALPN metadata encoding fails or the router cannot be built.
     #[allow(clippy::unused_async)]
+    #[tracing::instrument(name = "transport.spawn", skip(self), fields(service_count = self.services.len()))]
     pub async fn spawn(self) -> Result<TransportGuard> {
         let (shutdown_tx, _) = broadcast::channel(1);
         let (incoming, sender) = IrohIncoming::new(self.incoming_buffer_capacity);

@@ -72,6 +72,8 @@ pub mod transport;
 #[cfg(any(feature = "server", feature = "discovery"))]
 mod user_data;
 
+#[cfg(feature = "otel")]
+pub mod otel;
 #[cfg(feature = "discovery")]
 pub mod swarm;
 

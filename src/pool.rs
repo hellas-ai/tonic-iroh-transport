@@ -322,6 +322,11 @@ impl Ctx {
     /// Per-connection actor: establishes a connection, hands out refs, manages
     /// idle timeout, and watches for remote close.
     #[allow(clippy::too_many_lines)]
+    #[tracing::instrument(
+        name = "pool.connection",
+        skip(self, pool_tx, shutdown, actor_tx, rx),
+        fields(%node_id, generation),
+    )]
     async fn run_connection(
         self: Arc<Self>,
         pool_tx: mpsc::Sender<Msg>,
@@ -700,6 +705,7 @@ impl ConnectionPool {
     ///
     /// Returns [`PoolError`] if the pool is shut down, the connection times
     /// out, a pooled actor is saturated, or the connection limit is reached.
+    #[tracing::instrument(name = "pool.get_or_connect", skip(self), fields(peer_id = %id))]
     pub async fn get_or_connect(&self, id: EndpointId) -> Result<ConnectionRef, PoolError> {
         let tx = self.shared.tx()?;
 
@@ -773,6 +779,7 @@ impl ConnectionPool {
     ///
     /// Returns an error if the connection cannot be established or the tonic
     /// channel cannot be created.
+    #[tracing::instrument(name = "pool.channel", skip(self), fields(peer_id = %id))]
     pub async fn channel(&self, id: EndpointId) -> crate::Result<Channel> {
         let pool = self.clone();
         let channel = tonic::transport::Endpoint::try_from("http://[::]:50051")?
