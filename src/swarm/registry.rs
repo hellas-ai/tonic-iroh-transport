@@ -4,10 +4,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::channel::IrohChannel;
 use futures_util::Stream;
 use iroh::Endpoint;
 use tonic::server::NamedService;
-use tonic::transport::Channel;
 
 use super::discovery::{Discovery, Peer};
 use super::engine::SwarmEngine;
@@ -186,7 +186,7 @@ where
     /// # Errors
     ///
     /// Returns an error if no peer could be reached.
-    pub async fn first(self) -> crate::Result<Channel> {
+    pub async fn first(self) -> crate::Result<IrohChannel> {
         self.start().first().await
     }
 }

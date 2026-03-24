@@ -98,7 +98,7 @@ impl iroh::protocol::ProtocolHandler for GrpcProtocolHandler {
                                     IrohContext {
                                         node_id: remote_node_id,
                                         connection: connection.clone(),
-                                        established_at: std::time::Instant::now(),
+                                        established_at: n0_future::time::Instant::now(),
                                         alpn: connection.alpn().to_vec(),
                                     },
                                 );

@@ -1,7 +1,7 @@
 [package]
 name = "tonic-iroh-transport"
 authors = ["George Whewell <george@hellas.ai>"]
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 description = "Transport layer for using tonic gRPC over iroh p2p connections"
 license = "MIT OR Apache-2.0"
@@ -16,18 +16,19 @@ pre-release-hook = ["make", "all"]
 [features]
 default = ["client", "server"]
 client = [
+    "dep:h2",
     "dep:http",
-    "dep:hyper-util",
+    "dep:http-body",
+    "dep:n0-future",
     "dep:tokio",
     "dep:tower",
     "tonic/codegen",
-    "tonic/channel",
-    "tonic/transport",
 ]
 server = [
     "dep:axum",
     "dep:data-encoding",
     "dep:http",
+    "dep:n0-future",
     "dep:postcard",
     "dep:tokio",
     "dep:tokio-stream",
@@ -56,8 +57,10 @@ iroh = { version = "0.97" }
 tonic = { version = "0.14", default-features = false }
 tokio = { version = "1", default-features = false, optional = true }
 tokio-stream = { version = "0.1", default-features = false, optional = true }
+h2 = { version = "0.4", optional = true }
 http = { version = "1.4", default-features = false, optional = true }
-hyper-util = { version = "0.1", default-features = false, optional = true }
+http-body = { version = "1", optional = true }
+n0-future = { version = "0.3", optional = true }
 tower = { version = "0.4", features = ["util"], default-features = false, optional = true }
 futures-util = { version = "0.3", default-features = false }
 thiserror = { version = "2.0", default-features = false }
@@ -76,6 +79,7 @@ opentelemetry = { version = "0.31", optional = true, default-features = false, f
 tracing-opentelemetry = { version = "0.32", optional = true, default-features = false }
 
 [dev-dependencies]
+tonic-prost = "0.14"
 tokio-test = "0.4"
 tracing-subscriber = "0.3"
 anyhow = "1.0"
@@ -90,6 +94,3 @@ tokio-stream = "0.1"
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
-
-[build-dependencies]
-tonic-prost-build = "0.14"

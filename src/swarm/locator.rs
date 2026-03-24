@@ -7,11 +7,11 @@ use std::{
     time::Duration,
 };
 
+use crate::channel::IrohChannel;
 use futures_util::{future::BoxFuture, stream::FuturesUnordered, Stream, StreamExt};
 use iroh::Endpoint;
 use tokio::{sync::mpsc, task::JoinHandle, time};
 use tonic::server::NamedService;
-use tonic::transport::Channel;
 
 use tracing::debug;
 
@@ -45,7 +45,7 @@ impl Default for LocatorConfig {
 /// A handle that races connections and yields successful channels.
 pub struct Locator {
     task: JoinHandle<()>,
-    rx: mpsc::Receiver<Result<Channel>>,
+    rx: mpsc::Receiver<Result<IrohChannel>>,
 }
 
 impl Locator {
@@ -54,7 +54,7 @@ impl Locator {
     /// # Errors
     ///
     /// Returns an error if no peer could be reached.
-    pub async fn first(mut self) -> Result<Channel> {
+    pub async fn first(mut self) -> Result<IrohChannel> {
         let mut last_error = None;
 
         while let Some(res) = self.rx.recv().await {
@@ -98,7 +98,7 @@ impl Locator {
         S: NamedService + Send + 'static,
         St: Stream<Item = Result<Peer>> + Send + 'static,
     {
-        let (tx, rx) = mpsc::channel::<Result<Channel>>(opts.limit);
+        let (tx, rx) = mpsc::channel::<Result<IrohChannel>>(opts.limit);
         let mut state = LocatorState::<S, St>::new(pool, peers, opts, tx);
 
         let task = tokio::spawn(async move {
@@ -110,7 +110,7 @@ impl Locator {
 }
 
 impl Stream for Locator {
-    type Item = Result<Channel>;
+    type Item = Result<IrohChannel>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -131,10 +131,10 @@ where
 {
     pool: ConnectionPool,
     peers: Pin<Box<St>>,
-    inflight: FuturesUnordered<BoxFuture<'static, Result<Channel>>>,
+    inflight: FuturesUnordered<BoxFuture<'static, Result<IrohChannel>>>,
     stream_exhausted: bool,
     opts: LocatorConfig,
-    tx: mpsc::Sender<Result<Channel>>,
+    tx: mpsc::Sender<Result<IrohChannel>>,
     _marker: PhantomData<S>,
 }
 
@@ -147,7 +147,7 @@ where
         pool: ConnectionPool,
         peers: St,
         opts: LocatorConfig,
-        tx: mpsc::Sender<Result<Channel>>,
+        tx: mpsc::Sender<Result<IrohChannel>>,
     ) -> Self {
         Self {
             pool,
@@ -221,7 +221,7 @@ where
         let timeout = self.opts.timeout_each;
         let node_id = peer.id();
 
-        let fut: BoxFuture<'static, Result<Channel>> = Box::pin(async move {
+        let fut: BoxFuture<'static, Result<IrohChannel>> = Box::pin(async move {
             // The pool timeout covers iroh connection establishment; this outer
             // timeout also bounds post-connect stream/channel setup.
             time::timeout(timeout, pool.channel(node_id))
@@ -237,18 +237,19 @@ where
 #[cfg(test)]
 mod tests {
     use tokio::sync::mpsc;
-    use tonic::transport::Endpoint;
 
     use super::Locator;
+    use crate::channel::IrohChannel;
 
     #[tokio::test]
     async fn first_skips_errors_until_success() {
+        let dummy = IrohChannel::dummy().await;
         let (tx, rx) = mpsc::channel(4);
         let task = tokio::spawn(async move {
             tx.send(Err(crate::Error::connection("initial failure")))
                 .await
                 .expect("error send should succeed");
-            tx.send(Ok(Endpoint::from_static("http://[::]:50051").connect_lazy()))
+            tx.send(Ok(dummy))
                 .await
                 .expect("success send should succeed");
         });

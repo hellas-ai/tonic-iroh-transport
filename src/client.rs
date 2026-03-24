@@ -24,18 +24,16 @@
 //! # }
 //! ```
 
-use std::future::{Future, IntoFuture};
-use std::pin::Pin;
+use std::future::IntoFuture;
 use std::time::Duration;
-use std::time::Instant;
 
+use crate::channel::IrohChannel;
 use crate::{alpn::service_to_alpn, stream::IrohStream, Error, Result};
 use http::Uri;
-use hyper_util::rt::TokioIo;
 use iroh::endpoint::{ConnectingError, ConnectionError, QuicTransportConfig};
 use iroh::EndpointAddr;
-use tonic::transport::{Channel, Endpoint};
-use tower::service_fn;
+use n0_future::boxed::BoxFuture;
+use n0_future::time::Instant;
 use tracing::{debug, info, Instrument};
 
 /// Map a `ConnectionError` to an appropriate `io::ErrorKind`.
@@ -152,9 +150,6 @@ impl ConnectBuilder {
     ///
     /// If the connection is not established within this duration,
     /// the connect call will return an error.
-    ///
-    /// Note: This wraps the connection with `tokio::time::timeout`.
-    /// Iroh does not expose connect timeout configuration natively.
     #[must_use]
     pub fn connect_timeout(mut self, timeout: Duration) -> Self {
         self.connect_timeout = Some(timeout);
@@ -176,8 +171,8 @@ impl ConnectBuilder {
 }
 
 impl IntoFuture for ConnectBuilder {
-    type Output = Result<Channel>;
-    type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send>>;
+    type Output = Result<IrohChannel>;
+    type IntoFuture = BoxFuture<Self::Output>;
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(connect_impl(
@@ -223,7 +218,7 @@ async fn connect_impl(
     alpn: Vec<u8>,
     connect_timeout: Option<Duration>,
     transport_config: Option<QuicTransportConfig>,
-) -> Result<Channel> {
+) -> Result<IrohChannel> {
     let span = tracing::info_span!(
         "iroh.connect",
         peer_id = %target.id,
@@ -235,7 +230,7 @@ async fn connect_impl(
         let connect_future = connect_inner(endpoint, target, alpn, transport_config);
 
         let channel = if let Some(timeout) = connect_timeout {
-            tokio::time::timeout(timeout, connect_future)
+            n0_future::time::timeout(timeout, connect_future)
                 .await
                 .map_err(|_| Error::connection(format!("connection timed out after {timeout:?}")))?
         } else {
@@ -253,51 +248,40 @@ async fn connect_inner(
     target: EndpointAddr,
     alpn: Vec<u8>,
     transport_config: Option<QuicTransportConfig>,
-) -> Result<Channel> {
+) -> Result<IrohChannel> {
     let target_id = target.id;
     debug!(peer_id = %target_id, "connecting to peer");
 
-    // Create a dummy endpoint URI (not used by connector)
-    let channel = Endpoint::try_from("http://[::]:50051")?
-        .connect_with_connector(service_fn(move |_: Uri| {
-            let endpoint = endpoint.clone();
-            let target = target.clone();
-            let alpn = alpn.clone();
-            let transport_config = transport_config.clone();
+    info!(peer_id = %target.id, "establishing iroh connection");
 
-            async move {
-                info!(peer_id = %target.id, "establishing iroh connection");
+    // Connect to the peer using iroh
+    let connection = if let Some(config) = transport_config {
+        let opts = iroh::endpoint::ConnectOptions::new().with_transport_config(config);
+        let connecting = endpoint
+            .connect_with_opts(target.clone(), &alpn, opts)
+            .await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e))?;
+        connecting.await.map_err(connecting_error_to_io)?
+    } else {
+        endpoint
+            .connect(target.clone(), &alpn)
+            .await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e))?
+    };
 
-                // Connect to the peer using iroh
-                let connection = if let Some(config) = transport_config {
-                    let opts = iroh::endpoint::ConnectOptions::new().with_transport_config(config);
-                    let connecting = endpoint
-                        .connect_with_opts(target.clone(), &alpn, opts)
-                        .await
-                        .map_err(|e| {
-                            std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e)
-                        })?;
-                    connecting.await.map_err(connecting_error_to_io)?
-                } else {
-                    endpoint.connect(target.clone(), &alpn).await.map_err(|e| {
-                        std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e)
-                    })?
-                };
-                // Open a bidirectional stream for this gRPC call
-                let (send, recv) = connection.open_bi().await.map_err(connection_error_to_io)?;
+    // Open a bidirectional stream for the HTTP/2 connection
+    let (send, recv) = connection.open_bi().await.map_err(connection_error_to_io)?;
 
-                let context = crate::stream::IrohContext {
-                    node_id: target_id,
-                    connection: connection.clone(),
-                    established_at: Instant::now(),
-                    alpn,
-                };
+    let context = crate::stream::IrohContext {
+        node_id: target_id,
+        connection: connection.clone(),
+        established_at: Instant::now(),
+        alpn,
+    };
 
-                let stream = IrohStream::new(send, recv, context);
-                Ok::<_, std::io::Error>(TokioIo::new(stream))
-            }
-        }))
-        .await?;
+    let stream = IrohStream::new(send, recv, context);
+    let origin = Uri::from_static("http://iroh.local");
+    let channel = IrohChannel::handshake(stream, origin).await?;
 
     debug!(peer_id = %target_id, "connected to peer");
     Ok(channel)

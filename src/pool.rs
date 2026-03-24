@@ -31,20 +31,19 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use futures_util::stream::FuturesUnordered;
-use futures_util::StreamExt;
 use http::Uri;
-use hyper_util::rt::TokioIo;
 use iroh::endpoint::{
     AcceptBi, AcceptUni, Connection, ConnectionError, ConnectionStats, OpenBi, OpenUni,
     ReadDatagram,
 };
 use iroh::{Endpoint, EndpointId};
+use n0_future::task::JoinSet;
+use n0_future::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::sync::{mpsc, oneshot, Notify};
-use tonic::transport::Channel;
-use tower::service_fn;
 use tracing::{debug, trace};
+
+use crate::channel::IrohChannel;
 
 use crate::stream::write_error_to_io;
 
@@ -82,9 +81,6 @@ pub enum PoolError {
     /// Connection timed out.
     #[error("connection timed out")]
     Timeout,
-    /// No Tokio runtime is active.
-    #[error("no tokio runtime is active")]
-    NoRuntime,
     /// Too many active connections.
     #[error("too many connections")]
     TooManyConnections,
@@ -298,9 +294,8 @@ impl Shared {
             return Ok(runtime.tx.clone());
         }
 
-        let handle = tokio::runtime::Handle::try_current().map_err(|_| PoolError::NoRuntime)?;
         let (actor, tx) = PoolActor::new(self.endpoint.clone(), &self.alpn, self.options.clone());
-        handle.spawn(actor.run(tx.clone(), Arc::clone(&self.shutdown)));
+        n0_future::task::spawn(actor.run(tx.clone(), Arc::clone(&self.shutdown)));
         self.runtime
             .set(RuntimeHandle { tx: tx.clone() })
             .expect("pool runtime should only be initialized once");
@@ -336,7 +331,7 @@ impl Ctx {
         generation: u64,
         mut rx: mpsc::Receiver<RequestMsg>,
     ) {
-        let connect_result = tokio::time::timeout(self.options.connect_timeout, async {
+        let connect_result = n0_future::time::timeout(self.options.connect_timeout, async {
             self.endpoint
                 .connect(node_id, &self.alpn)
                 .await
@@ -362,8 +357,8 @@ impl Ctx {
         }
 
         let counter = ConnectionCounter::new();
-        let idle_sleep = tokio::time::sleep(Duration::from_secs(0));
-        tokio::pin!(idle_sleep);
+        let idle_sleep = n0_future::time::sleep(Duration::from_secs(0));
+        let mut idle_sleep = std::pin::pin!(idle_sleep);
         let mut idle_active = false;
         let mut shutdown_pending = shutdown.is_closed();
 
@@ -456,7 +451,7 @@ impl Ctx {
                     idle_active = true;
                     idle_sleep
                         .as_mut()
-                        .reset(tokio::time::Instant::now() + self.options.idle_timeout);
+                        .reset(Instant::now() + self.options.idle_timeout);
                 }
 
                 () = &mut idle_sleep, if idle_active => {
@@ -495,7 +490,7 @@ struct PoolActor {
     ctx: Arc<Ctx>,
     idle: VecDeque<(EndpointId, u64)>,
     next_generation: AtomicU64,
-    tasks: FuturesUnordered<Pin<Box<dyn std::future::Future<Output = ()> + Send>>>,
+    tasks: JoinSet<()>,
 }
 
 impl PoolActor {
@@ -512,7 +507,7 @@ impl PoolActor {
                     endpoint,
                 }),
                 next_generation: AtomicU64::new(1),
-                tasks: FuturesUnordered::new(),
+                tasks: JoinSet::new(),
             },
             tx,
         )
@@ -597,10 +592,10 @@ impl PoolActor {
                 let pool_tx = pool_tx.clone();
                 let shutdown = Arc::clone(shutdown);
                 let actor_tx = conn_tx.clone();
-                self.tasks.push(Box::pin(async move {
+                self.tasks.spawn(async move {
                     ctx.run_connection(pool_tx, shutdown, actor_tx, id, generation, conn_rx)
                         .await;
-                }));
+                });
 
                 if conn_tx.send(req).await.is_err() {
                     self.remove_connection_if_match(id, generation);
@@ -635,14 +630,14 @@ impl PoolActor {
                         None => break,
                     }
                 }
-                _ = self.tasks.next(), if !self.tasks.is_empty() => {}
+                _ = self.tasks.join_next(), if !self.tasks.is_empty() => {}
             }
         }
 
         self.rx.close();
         self.connections.clear();
         self.idle.clear();
-        while self.tasks.next().await.is_some() {}
+        while self.tasks.join_next().await.is_some() {}
     }
 }
 
@@ -769,25 +764,20 @@ impl ConnectionPool {
         }))
     }
 
-    /// Get a tonic [`Channel`] for the given peer, backed by a pooled connection.
+    /// Get an [`IrohChannel`] for the given peer, backed by a pooled connection.
     ///
     /// The returned channel opens a bidirectional QUIC stream on the pooled
-    /// connection. The connection is kept alive as long as the channel's
-    /// underlying transport exists.
+    /// connection and performs an HTTP/2 handshake over it.
     ///
     /// # Errors
     ///
-    /// Returns an error if the connection cannot be established or the tonic
-    /// channel cannot be created.
+    /// Returns an error if the connection cannot be established or the HTTP/2
+    /// handshake fails.
     #[tracing::instrument(name = "pool.channel", skip(self), fields(peer_id = %id))]
-    pub async fn channel(&self, id: EndpointId) -> crate::Result<Channel> {
-        let pool = self.clone();
-        let channel = tonic::transport::Endpoint::try_from("http://[::]:50051")?
-            .connect_with_connector(service_fn(move |_: Uri| {
-                let pool = pool.clone();
-                async move { pool.open_stream(id).await.map(TokioIo::new) }
-            }))
-            .await?;
+    pub async fn channel(&self, id: EndpointId) -> crate::Result<IrohChannel> {
+        let pooled_stream = self.open_stream(id).await?;
+        let origin = Uri::from_static("http://iroh.local");
+        let channel = IrohChannel::handshake(pooled_stream, origin).await?;
         Ok(channel)
     }
 }
