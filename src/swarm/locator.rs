@@ -7,11 +7,11 @@ use std::{
     time::Duration,
 };
 
+use crate::channel::IrohChannel;
 use futures_util::{future::BoxFuture, stream::FuturesUnordered, Stream, StreamExt};
 use iroh::Endpoint;
 use tokio::{sync::mpsc, task::JoinHandle, time};
 use tonic::server::NamedService;
-use crate::channel::IrohChannel;
 
 use tracing::debug;
 

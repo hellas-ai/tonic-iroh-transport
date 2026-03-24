@@ -4,10 +4,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::channel::IrohChannel;
 use futures_util::Stream;
 use iroh::Endpoint;
 use tonic::server::NamedService;
-use crate::channel::IrohChannel;
 
 use super::discovery::{Discovery, Peer};
 use super::engine::SwarmEngine;

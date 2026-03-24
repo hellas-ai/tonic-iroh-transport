@@ -108,6 +108,7 @@ impl IrohChannel {
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 impl IrohChannel {
     /// Create a dummy channel for testing. Performs a real h2 handshake over
     /// an in-memory duplex stream. The channel is functional but has no real
@@ -180,13 +181,11 @@ impl tower::Service<Request<Body>> for IrohChannel {
 /// `AddOrigin` middleware exactly (`add_origin.rs:53-58`).
 fn apply_origin(uri: Uri, origin: &Uri) -> Uri {
     let mut parts: http::uri::Parts = uri.into();
-    parts.scheme = origin
-        .scheme()
+    parts.scheme = origin.scheme().cloned().or_else(|| Some(Scheme::HTTP));
+    parts.authority = origin
+        .authority()
         .cloned()
-        .or_else(|| Some(Scheme::HTTP));
-    parts.authority = origin.authority().cloned().or_else(|| {
-        Authority::try_from("iroh.local").ok()
-    });
+        .or_else(|| Authority::try_from("iroh.local").ok());
     Uri::from_parts(parts).expect("valid uri after origin injection")
 }
 
@@ -194,10 +193,7 @@ fn apply_origin(uri: Uri, origin: &Uri) -> Uri {
 ///
 /// **V1 limitation**: data is sent without explicit capacity reservation.
 /// A hard limit of [`MAX_OUTBOUND_BODY_BYTES`] prevents unbounded buffering.
-async fn pump_body(
-    body: Body,
-    send_stream: &mut h2::SendStream<Bytes>,
-) -> Result<(), Error> {
+async fn pump_body(body: Body, send_stream: &mut h2::SendStream<Bytes>) -> Result<(), Error> {
     let mut body = Box::pin(body);
     let mut total_sent = 0usize;
 
@@ -217,9 +213,7 @@ async fn pump_body(
                     send_stream.send_data(data, false).map_err(Error::H2)?;
                 } else if frame.is_trailers() {
                     let trailers = frame.into_trailers().expect("checked is_trailers");
-                    send_stream
-                        .send_trailers(trailers)
-                        .map_err(Error::H2)?;
+                    send_stream.send_trailers(trailers).map_err(Error::H2)?;
                     return Ok(());
                 }
             }
@@ -294,17 +288,17 @@ impl HttpBody for IrohResponseBody {
                             let len = data.len();
                             if let Err(e) = recv.flow_control().release_capacity(len) {
                                 this.state = BodyState::Done;
-                                return Poll::Ready(Some(Err(tonic::Status::internal(
-                                    format!("flow control error: {e}"),
-                                ))));
+                                return Poll::Ready(Some(Err(tonic::Status::internal(format!(
+                                    "flow control error: {e}"
+                                )))));
                             }
                             return Poll::Ready(Some(Ok(http_body::Frame::data(data))));
                         }
                         Poll::Ready(Some(Err(e))) => {
                             this.state = BodyState::Done;
-                            return Poll::Ready(Some(Err(tonic::Status::internal(
-                                format!("h2 data error: {e}"),
-                            ))));
+                            return Poll::Ready(Some(Err(tonic::Status::internal(format!(
+                                "h2 data error: {e}"
+                            )))));
                         }
                         Poll::Ready(None) => {
                             // DATA exhausted — transition to trailers.
@@ -317,25 +311,23 @@ impl HttpBody for IrohResponseBody {
                         Poll::Pending => return Poll::Pending,
                     }
                 }
-                BodyState::Trailers(recv) => {
-                    match recv.poll_trailers(cx) {
-                        Poll::Ready(Ok(Some(trailers))) => {
-                            this.state = BodyState::Done;
-                            return Poll::Ready(Some(Ok(http_body::Frame::trailers(trailers))));
-                        }
-                        Poll::Ready(Ok(None)) => {
-                            this.state = BodyState::Done;
-                            return Poll::Ready(None);
-                        }
-                        Poll::Ready(Err(e)) => {
-                            this.state = BodyState::Done;
-                            return Poll::Ready(Some(Err(tonic::Status::internal(
-                                format!("h2 trailers error: {e}"),
-                            ))));
-                        }
-                        Poll::Pending => return Poll::Pending,
+                BodyState::Trailers(recv) => match recv.poll_trailers(cx) {
+                    Poll::Ready(Ok(Some(trailers))) => {
+                        this.state = BodyState::Done;
+                        return Poll::Ready(Some(Ok(http_body::Frame::trailers(trailers))));
                     }
-                }
+                    Poll::Ready(Ok(None)) => {
+                        this.state = BodyState::Done;
+                        return Poll::Ready(None);
+                    }
+                    Poll::Ready(Err(e)) => {
+                        this.state = BodyState::Done;
+                        return Poll::Ready(Some(Err(tonic::Status::internal(format!(
+                            "h2 trailers error: {e}"
+                        )))));
+                    }
+                    Poll::Pending => return Poll::Pending,
+                },
                 BodyState::Done => return Poll::Ready(None),
             }
         }

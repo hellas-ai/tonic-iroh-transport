@@ -11,10 +11,10 @@ pub mod interop_service_client {
         dead_code,
         missing_docs,
         clippy::wildcard_imports,
-        clippy::let_unit_value,
+        clippy::let_unit_value
     )]
-    use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    use tonic::codegen::*;
     /// Minimal service exercising all four gRPC interaction modes.
     #[derive(Debug, Clone)]
     pub struct InteropServiceClient<T> {
@@ -48,9 +48,8 @@ pub mod interop_service_client {
                     <T as tonic::client::GrpcService<tonic::body::Body>>::ResponseBody,
                 >,
             >,
-            <T as tonic::codegen::Service<
-                http::Request<tonic::body::Body>,
-            >>::Error: Into<StdError> + std::marker::Send + std::marker::Sync,
+            <T as tonic::codegen::Service<http::Request<tonic::body::Body>>>::Error:
+                Into<StdError> + std::marker::Send + std::marker::Sync,
         {
             InteropServiceClient::new(InterceptedService::new(inner, interceptor))
         }
@@ -89,18 +88,11 @@ pub mod interop_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::Msg>,
         ) -> std::result::Result<tonic::Response<super::Msg>, tonic::Status> {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/interop.v1.InteropService/Unary",
-            );
+            let path = http::uri::PathAndQuery::from_static("/interop.v1.InteropService/Unary");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("interop.v1.InteropService", "Unary"));
@@ -109,22 +101,14 @@ pub mod interop_service_client {
         pub async fn server_stream(
             &mut self,
             request: impl tonic::IntoRequest<super::Msg>,
-        ) -> std::result::Result<
-            tonic::Response<tonic::codec::Streaming<super::Msg>>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<tonic::codec::Streaming<super::Msg>>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/interop.v1.InteropService/ServerStream",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/interop.v1.InteropService/ServerStream");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("interop.v1.InteropService", "ServerStream"));
@@ -134,18 +118,12 @@ pub mod interop_service_client {
             &mut self,
             request: impl tonic::IntoStreamingRequest<Message = super::Msg>,
         ) -> std::result::Result<tonic::Response<super::Msg>, tonic::Status> {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/interop.v1.InteropService/ClientStream",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/interop.v1.InteropService/ClientStream");
             let mut req = request.into_streaming_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("interop.v1.InteropService", "ClientStream"));
@@ -154,22 +132,14 @@ pub mod interop_service_client {
         pub async fn bidi_stream(
             &mut self,
             request: impl tonic::IntoStreamingRequest<Message = super::Msg>,
-        ) -> std::result::Result<
-            tonic::Response<tonic::codec::Streaming<super::Msg>>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<tonic::codec::Streaming<super::Msg>>, tonic::Status>
+        {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/interop.v1.InteropService/BidiStream",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/interop.v1.InteropService/BidiStream");
             let mut req = request.into_streaming_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("interop.v1.InteropService", "BidiStream"));
@@ -184,7 +154,7 @@ pub mod interop_service_server {
         dead_code,
         missing_docs,
         clippy::wildcard_imports,
-        clippy::let_unit_value,
+        clippy::let_unit_value
     )]
     use tonic::codegen::*;
     /// Generated trait containing gRPC methods that should be implemented for use with InteropServiceServer.
@@ -197,16 +167,12 @@ pub mod interop_service_server {
         /// Server streaming response type for the ServerStream method.
         type ServerStreamStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::Msg, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         async fn server_stream(
             &self,
             request: tonic::Request<super::Msg>,
-        ) -> std::result::Result<
-            tonic::Response<Self::ServerStreamStream>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<Self::ServerStreamStream>, tonic::Status>;
         async fn client_stream(
             &self,
             request: tonic::Request<tonic::Streaming<super::Msg>>,
@@ -214,8 +180,7 @@ pub mod interop_service_server {
         /// Server streaming response type for the BidiStream method.
         type BidiStreamStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::Msg, tonic::Status>,
-            >
-            + std::marker::Send
+            > + std::marker::Send
             + 'static;
         async fn bidi_stream(
             &self,
@@ -244,10 +209,7 @@ pub mod interop_service_server {
                 max_encoding_message_size: None,
             }
         }
-        pub fn with_interceptor<F>(
-            inner: T,
-            interceptor: F,
-        ) -> InterceptedService<Self, F>
+        pub fn with_interceptor<F>(inner: T, interceptor: F) -> InterceptedService<Self, F>
         where
             F: tonic::service::Interceptor,
         {
@@ -302,21 +264,13 @@ pub mod interop_service_server {
                 "/interop.v1.InteropService/Unary" => {
                     #[allow(non_camel_case_types)]
                     struct UnarySvc<T: InteropService>(pub Arc<T>);
-                    impl<T: InteropService> tonic::server::UnaryService<super::Msg>
-                    for UnarySvc<T> {
+                    impl<T: InteropService> tonic::server::UnaryService<super::Msg> for UnarySvc<T> {
                         type Response = super::Msg;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::Msg>,
-                        ) -> Self::Future {
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
+                        fn call(&mut self, request: tonic::Request<super::Msg>) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as InteropService>::unary(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as InteropService>::unary(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -345,20 +299,12 @@ pub mod interop_service_server {
                 "/interop.v1.InteropService/ServerStream" => {
                     #[allow(non_camel_case_types)]
                     struct ServerStreamSvc<T: InteropService>(pub Arc<T>);
-                    impl<
-                        T: InteropService,
-                    > tonic::server::ServerStreamingService<super::Msg>
-                    for ServerStreamSvc<T> {
+                    impl<T: InteropService> tonic::server::ServerStreamingService<super::Msg> for ServerStreamSvc<T> {
                         type Response = super::Msg;
                         type ResponseStream = T::ServerStreamStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::Msg>,
-                        ) -> Self::Future {
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
+                        fn call(&mut self, request: tonic::Request<super::Msg>) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
                                 <T as InteropService>::server_stream(&inner, request).await
@@ -391,15 +337,9 @@ pub mod interop_service_server {
                 "/interop.v1.InteropService/ClientStream" => {
                     #[allow(non_camel_case_types)]
                     struct ClientStreamSvc<T: InteropService>(pub Arc<T>);
-                    impl<
-                        T: InteropService,
-                    > tonic::server::ClientStreamingService<super::Msg>
-                    for ClientStreamSvc<T> {
+                    impl<T: InteropService> tonic::server::ClientStreamingService<super::Msg> for ClientStreamSvc<T> {
                         type Response = super::Msg;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<tonic::Streaming<super::Msg>>,
@@ -436,14 +376,11 @@ pub mod interop_service_server {
                 "/interop.v1.InteropService/BidiStream" => {
                     #[allow(non_camel_case_types)]
                     struct BidiStreamSvc<T: InteropService>(pub Arc<T>);
-                    impl<T: InteropService> tonic::server::StreamingService<super::Msg>
-                    for BidiStreamSvc<T> {
+                    impl<T: InteropService> tonic::server::StreamingService<super::Msg> for BidiStreamSvc<T> {
                         type Response = super::Msg;
                         type ResponseStream = T::BidiStreamStream;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
-                            tonic::Status,
-                        >;
+                        type Future =
+                            BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<tonic::Streaming<super::Msg>>,
@@ -477,25 +414,19 @@ pub mod interop_service_server {
                     };
                     Box::pin(fut)
                 }
-                _ => {
-                    Box::pin(async move {
-                        let mut response = http::Response::new(
-                            tonic::body::Body::default(),
-                        );
-                        let headers = response.headers_mut();
-                        headers
-                            .insert(
-                                tonic::Status::GRPC_STATUS,
-                                (tonic::Code::Unimplemented as i32).into(),
-                            );
-                        headers
-                            .insert(
-                                http::header::CONTENT_TYPE,
-                                tonic::metadata::GRPC_CONTENT_TYPE,
-                            );
-                        Ok(response)
-                    })
-                }
+                _ => Box::pin(async move {
+                    let mut response = http::Response::new(tonic::body::Body::default());
+                    let headers = response.headers_mut();
+                    headers.insert(
+                        tonic::Status::GRPC_STATUS,
+                        (tonic::Code::Unimplemented as i32).into(),
+                    );
+                    headers.insert(
+                        http::header::CONTENT_TYPE,
+                        tonic::metadata::GRPC_CONTENT_TYPE,
+                    );
+                    Ok(response)
+                }),
             }
         }
     }

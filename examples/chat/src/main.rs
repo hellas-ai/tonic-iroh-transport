@@ -6,8 +6,8 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
-use tonic_iroh_transport::IrohChannel;
 use tonic::{Request, Response, Status, Streaming};
+use tonic_iroh_transport::IrohChannel;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -770,7 +770,10 @@ async fn interactive_chat(
     Ok(())
 }
 
-async fn ping_node(client: &mut NodeServiceClient<IrohChannel>, data: Option<String>) -> Result<()> {
+async fn ping_node(
+    client: &mut NodeServiceClient<IrohChannel>,
+    data: Option<String>,
+) -> Result<()> {
     let now = chrono::Utc::now().timestamp();
     let data = data.unwrap_or_else(|| "ping".to_string());
 

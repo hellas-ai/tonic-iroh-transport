@@ -40,8 +40,7 @@ impl InteropService for TestInteropService {
         }))
     }
 
-    type ServerStreamStream =
-        tokio_stream::wrappers::ReceiverStream<Result<Msg, Status>>;
+    type ServerStreamStream = tokio_stream::wrappers::ReceiverStream<Result<Msg, Status>>;
 
     async fn server_stream(
         &self,
@@ -56,10 +55,16 @@ impl InteropService for TestInteropService {
         let (tx, rx) = tokio::sync::mpsc::channel(count.max(1));
         tokio::spawn(async move {
             for i in 0..count {
-                let _ = tx.send(Ok(Msg { value: format!("item-{i}") })).await;
+                let _ = tx
+                    .send(Ok(Msg {
+                        value: format!("item-{i}"),
+                    }))
+                    .await;
             }
         });
-        Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(rx)))
+        Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(
+            rx,
+        )))
     }
 
     async fn client_stream(
@@ -76,8 +81,7 @@ impl InteropService for TestInteropService {
         }))
     }
 
-    type BidiStreamStream =
-        tokio_stream::wrappers::ReceiverStream<Result<Msg, Status>>;
+    type BidiStreamStream = tokio_stream::wrappers::ReceiverStream<Result<Msg, Status>>;
 
     async fn bidi_stream(
         &self,
@@ -95,7 +99,9 @@ impl InteropService for TestInteropService {
                 }
             }
         });
-        Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(rx)))
+        Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(
+            rx,
+        )))
     }
 }
 
@@ -190,9 +196,7 @@ async fn server_streaming() {
     let (mut client, _guard, _ep) = setup().await;
 
     let resp = client
-        .server_stream(Request::new(Msg {
-            value: "5".into(),
-        }))
+        .server_stream(Request::new(Msg { value: "5".into() }))
         .await
         .expect("server_stream should succeed");
 
@@ -202,7 +206,10 @@ async fn server_streaming() {
         .collect()
         .await;
 
-    assert_eq!(items, vec!["item-0", "item-1", "item-2", "item-3", "item-4"]);
+    assert_eq!(
+        items,
+        vec!["item-0", "item-1", "item-2", "item-3", "item-4"]
+    );
 }
 
 #[tokio::test]
@@ -227,10 +234,7 @@ async fn client_streaming() {
 async fn bidi_streaming() {
     let (mut client, _guard, _ep) = setup().await;
 
-    let input = tokio_stream::iter(vec![
-        Msg { value: "x".into() },
-        Msg { value: "y".into() },
-    ]);
+    let input = tokio_stream::iter(vec![Msg { value: "x".into() }, Msg { value: "y".into() }]);
 
     let resp = client
         .bidi_stream(Request::new(input))

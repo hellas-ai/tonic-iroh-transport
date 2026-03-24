@@ -2,10 +2,10 @@
 
 use iroh::endpoint::WriteError;
 use iroh::EndpointId;
+use n0_future::time::Instant;
 use std::io::ErrorKind;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use n0_future::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 #[cfg(feature = "server")]
 use tonic::transport::server::Connected;
