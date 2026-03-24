@@ -5,6 +5,7 @@
 //! - `client`: Outbound connectors (`IrohConnect`, `connect_alpn`).
 //! - `server`: Inbound transport runtime (`TransportBuilder`, `TransportGuard`).
 //! - `discovery`: Peer discovery/swarm support (depends on `client`).
+//! - `otel`: OpenTelemetry trace context propagation interceptors.
 //!
 //! # Example
 //!

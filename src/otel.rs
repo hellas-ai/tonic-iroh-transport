@@ -71,7 +71,10 @@ impl tonic::service::Interceptor for TraceContextExtractor {
 ///
 /// Use this directly if you need custom propagation logic beyond the
 /// provided interceptors.
-pub struct MetadataInjector<'a>(pub &'a mut MetadataMap);
+pub struct MetadataInjector<'a>(
+    /// The metadata map to inject headers into.
+    pub &'a mut MetadataMap,
+);
 
 impl Injector for MetadataInjector<'_> {
     fn set(&mut self, key: &str, value: String) {
@@ -87,7 +90,10 @@ impl Injector for MetadataInjector<'_> {
 ///
 /// Use this directly if you need custom propagation logic beyond the
 /// provided interceptors.
-pub struct MetadataExtractorRef<'a>(pub &'a MetadataMap);
+pub struct MetadataExtractorRef<'a>(
+    /// The metadata map to extract headers from.
+    pub &'a MetadataMap,
+);
 
 impl Extractor for MetadataExtractorRef<'_> {
     fn get(&self, key: &str) -> Option<&str> {
@@ -102,5 +108,100 @@ impl Extractor for MetadataExtractorRef<'_> {
                 tonic::metadata::KeyRef::Binary(_) => None,
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opentelemetry::propagation::TextMapPropagator;
+    use opentelemetry_sdk::propagation::TraceContextPropagator;
+    use tonic::service::Interceptor;
+
+    #[test]
+    fn injector_sets_traceparent_header() {
+        let mut metadata = MetadataMap::new();
+
+        // Inject a known context with a valid traceparent
+        let mut injector = MetadataInjector(&mut metadata);
+        injector.set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".into());
+
+        assert_eq!(
+            metadata.get("traceparent").unwrap().to_str().unwrap(),
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        );
+    }
+
+    #[test]
+    fn extractor_reads_traceparent_header() {
+        let mut metadata = MetadataMap::new();
+        metadata.insert(
+            "traceparent",
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".parse().unwrap(),
+        );
+
+        let extractor = MetadataExtractorRef(&metadata);
+        assert_eq!(
+            extractor.get("traceparent").unwrap(),
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        );
+        assert!(extractor.keys().contains(&"traceparent"));
+    }
+
+    #[test]
+    fn round_trip_inject_extract() {
+        let propagator = TraceContextPropagator::new();
+
+        // Inject a context into metadata
+        let mut metadata = MetadataMap::new();
+        let traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        let mut inject_map = MetadataMap::new();
+        inject_map.insert("traceparent", traceparent.parse().unwrap());
+
+        // Extract a context from the injected metadata
+        let extracted_cx = propagator.extract(&MetadataExtractorRef(&inject_map));
+
+        // Re-inject the extracted context into fresh metadata
+        propagator.inject_context(&extracted_cx, &mut MetadataInjector(&mut metadata));
+
+        // The traceparent should survive the round trip
+        assert_eq!(
+            metadata.get("traceparent").unwrap().to_str().unwrap(),
+            traceparent
+        );
+    }
+
+    #[test]
+    fn interceptor_inject_extract_round_trip() {
+        let propagator = TraceContextPropagator::new();
+        opentelemetry::global::set_text_map_propagator(propagator);
+
+        // Simulate client-side injection
+        let mut client_request = Request::new(());
+        let traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        client_request
+            .metadata_mut()
+            .insert("traceparent", traceparent.parse().unwrap());
+
+        // Extract on server side
+        let mut extractor = TraceContextExtractor;
+        let server_request = extractor.call(client_request).unwrap();
+
+        // Verify the OTel context was stored in extensions
+        let cx = server_request
+            .extensions()
+            .get::<opentelemetry::Context>()
+            .expect("context should be in extensions");
+
+        // Re-inject from the extracted context
+        let mut metadata = MetadataMap::new();
+        opentelemetry::global::get_text_map_propagator(|p| {
+            p.inject_context(cx, &mut MetadataInjector(&mut metadata));
+        });
+
+        assert_eq!(
+            metadata.get("traceparent").unwrap().to_str().unwrap(),
+            traceparent
+        );
     }
 }
