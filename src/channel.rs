@@ -136,7 +136,7 @@ impl tower::Service<Request<Body>> for IrohChannel {
         Box::pin(async move {
             // --- 1. Inject origin (scheme + authority) ---
             let (mut head, body) = request.into_parts();
-            head.uri = apply_origin(head.uri, &origin);
+            head.uri = apply_origin(head.uri, &origin)?;
 
             // --- 2. Determine if body is empty ---
             let body_is_empty = body.is_end_stream();
@@ -172,20 +172,21 @@ impl tower::Service<Request<Body>> for IrohChannel {
 
 /// Always rewrite scheme + authority from `origin`, matching tonic's
 /// `AddOrigin` middleware exactly (`add_origin.rs:53-58`).
-fn apply_origin(uri: Uri, origin: &Uri) -> Uri {
+fn apply_origin(uri: Uri, origin: &Uri) -> Result<Uri, Error> {
     let mut parts: http::uri::Parts = uri.into();
-    parts.scheme = origin.scheme().cloned().or_else(|| Some(Scheme::HTTP));
+    parts.scheme = origin.scheme().cloned().or(Some(Scheme::HTTP));
     parts.authority = origin
         .authority()
         .cloned()
         .or_else(|| Authority::try_from("iroh.local").ok());
-    Uri::from_parts(parts).expect("valid uri after origin injection")
+    Uri::from_parts(parts).map_err(|e| Error::Connection(format!("invalid request URI: {e}")))
 }
 
 /// Pump frames from a tonic `Body` into an h2 `SendStream`.
 ///
-/// Data is forwarded without explicit capacity reservation — h2's internal
-/// flow control (the peer's window) provides back-pressure.
+/// Uses `reserve_capacity` / `poll_capacity` for outbound flow control so
+/// large or streaming request bodies apply proper back-pressure instead of
+/// buffering unboundedly in h2's internal buffer.
 async fn pump_body(body: Body, send_stream: &mut h2::SendStream<Bytes>) -> Result<(), Error> {
     let mut body = Box::pin(body);
 
@@ -194,6 +195,18 @@ async fn pump_body(body: Body, send_stream: &mut h2::SendStream<Bytes>) -> Resul
             Some(Ok(frame)) => {
                 if frame.is_data() {
                     let data = frame.into_data().expect("checked is_data");
+                    // Wait for capacity before sending to avoid unbounded
+                    // buffering inside h2.
+                    send_stream.reserve_capacity(data.len());
+                    match std::future::poll_fn(|cx| send_stream.poll_capacity(cx)).await {
+                        Some(Ok(_)) => {}
+                        Some(Err(e)) => return Err(Error::H2(e)),
+                        None => {
+                            return Err(Error::Connection(
+                                "stream closed while reserving capacity".into(),
+                            ))
+                        }
+                    }
                     send_stream.send_data(data, false).map_err(Error::H2)?;
                 } else if frame.is_trailers() {
                     let trailers = frame.into_trailers().expect("checked is_trailers");
