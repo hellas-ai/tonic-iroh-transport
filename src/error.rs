@@ -19,9 +19,14 @@ pub enum Error {
     QuicRead(#[from] iroh::endpoint::ReadError),
 
     /// Tonic transport error.
-    #[cfg(any(feature = "client", feature = "server"))]
+    #[cfg(feature = "server")]
     #[error("Tonic transport error: {0}")]
     TonicTransport(#[from] tonic::transport::Error),
+
+    /// HTTP/2 error.
+    #[cfg(feature = "client")]
+    #[error("HTTP/2 error: {0}")]
+    H2(#[from] h2::Error),
 
     /// I/O error.
     #[error("I/O error: {0}")]

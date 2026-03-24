@@ -60,6 +60,8 @@ pub use iroh;
 #[cfg(any(feature = "client", feature = "server", feature = "discovery"))]
 mod alpn;
 #[cfg(feature = "client")]
+pub mod channel;
+#[cfg(feature = "client")]
 pub mod client;
 pub mod error;
 #[cfg(feature = "client")]
@@ -79,6 +81,8 @@ pub mod otel;
 pub mod swarm;
 
 // Re-export key types
+#[cfg(feature = "client")]
+pub use channel::IrohChannel;
 #[cfg(feature = "client")]
 pub use client::{connect_alpn, ConnectBuilder, IrohConnect};
 pub use error::{Error, Result};

@@ -155,7 +155,7 @@ async fn test_basic_iroh_connection() {
     let context = tonic_iroh_transport::stream::IrohContext {
         node_id: endpoint2.id(),
         connection: conn.clone(),
-        established_at: std::time::Instant::now(),
+        established_at: n0_future::time::Instant::now(),
         alpn: conn.alpn().to_vec(),
     };
     let _stream = IrohStream::new(send, recv, context);
