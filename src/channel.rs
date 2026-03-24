@@ -19,13 +19,6 @@ use tracing::debug;
 
 use crate::error::Error;
 
-/// Maximum request body size before we reject (4 MiB).
-///
-/// This is a safety limit for the V1 body pump which buffers outbound data
-/// without h2 capacity reservation. A future version should use
-/// `SendStream::reserve_capacity` / `poll_capacity` for true back-pressure.
-const MAX_OUTBOUND_BODY_BYTES: usize = 4 * 1024 * 1024;
-
 /// A gRPC channel over an HTTP/2 connection managed by [`h2`].
 ///
 /// Created via [`IrohChannel::handshake`]. Cheaply cloneable — all clones
@@ -191,25 +184,16 @@ fn apply_origin(uri: Uri, origin: &Uri) -> Uri {
 
 /// Pump frames from a tonic `Body` into an h2 `SendStream`.
 ///
-/// **V1 limitation**: data is sent without explicit capacity reservation.
-/// A hard limit of [`MAX_OUTBOUND_BODY_BYTES`] prevents unbounded buffering.
+/// Data is forwarded without explicit capacity reservation — h2's internal
+/// flow control (the peer's window) provides back-pressure.
 async fn pump_body(body: Body, send_stream: &mut h2::SendStream<Bytes>) -> Result<(), Error> {
     let mut body = Box::pin(body);
-    let mut total_sent = 0usize;
 
     loop {
         match std::future::poll_fn(|cx| Pin::as_mut(&mut body).poll_frame(cx)).await {
             Some(Ok(frame)) => {
                 if frame.is_data() {
                     let data = frame.into_data().expect("checked is_data");
-                    total_sent += data.len();
-                    if total_sent > MAX_OUTBOUND_BODY_BYTES {
-                        return Err(Error::Connection(format!(
-                            "outbound body exceeded {MAX_OUTBOUND_BODY_BYTES} byte limit"
-                        )));
-                    }
-                    // TODO: use reserve_capacity/poll_capacity for proper
-                    // outbound flow control instead of unbounded send_data.
                     send_stream.send_data(data, false).map_err(Error::H2)?;
                 } else if frame.is_trailers() {
                     let trailers = frame.into_trailers().expect("checked is_trailers");

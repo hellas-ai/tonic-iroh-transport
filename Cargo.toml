@@ -19,7 +19,6 @@ client = [
     "dep:h2",
     "dep:http",
     "dep:http-body",
-    "dep:http-body-util",
     "dep:n0-future",
     "dep:tokio",
     "dep:tower",
@@ -29,6 +28,7 @@ server = [
     "dep:axum",
     "dep:data-encoding",
     "dep:http",
+    "dep:n0-future",
     "dep:postcard",
     "dep:tokio",
     "dep:tokio-stream",
@@ -60,7 +60,6 @@ tokio-stream = { version = "0.1", default-features = false, optional = true }
 h2 = { version = "0.4", optional = true }
 http = { version = "1.4", default-features = false, optional = true }
 http-body = { version = "1", optional = true }
-http-body-util = { version = "0.1", optional = true }
 n0-future = { version = "0.3", optional = true }
 tower = { version = "0.4", features = ["util"], default-features = false, optional = true }
 futures-util = { version = "0.3", default-features = false }
