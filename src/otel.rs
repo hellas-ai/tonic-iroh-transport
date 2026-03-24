@@ -1,7 +1,7 @@
 //! Optional OpenTelemetry trace context propagation for tonic gRPC.
 //!
-//! Provides tonic interceptors that inject/extract W3C `traceparent`/`tracestate`
-//! headers into gRPC metadata, enabling distributed tracing across iroh P2P calls.
+//! Provides a client-side interceptor and a server-side tower layer for
+//! propagating W3C `traceparent`/`tracestate` headers across iroh P2P calls.
 //!
 //! # Client-side injection
 //!
@@ -12,18 +12,16 @@
 //! // let client = MyServiceClient::with_interceptor(channel, TraceContextInjector);
 //! ```
 //!
-//! # Server-side extraction
+//! # Server-side span parenting
 //!
 //! ```rust,no_run
-//! use tonic::service::interceptor::InterceptedService;
-//! use tonic_iroh_transport::otel::TraceContextExtractor;
+//! use tonic_iroh_transport::otel::TraceContextLayer;
 //!
-//! // Wrap a server so incoming trace context is attached to request extensions
-//! // let service = InterceptedService::new(my_server, TraceContextExtractor);
+//! // Wrap a server so incoming requests run inside a span parented to the caller's trace
+//! // let service = TraceContextLayer.layer(my_server);
 //! ```
 
-use opentelemetry::propagation::{Extractor, Injector};
-use tonic::metadata::MetadataMap;
+use opentelemetry::propagation::Injector;
 use tonic::{Request, Status};
 
 /// Client-side interceptor that injects the current OpenTelemetry trace context
@@ -44,37 +42,8 @@ impl tonic::service::Interceptor for TraceContextInjector {
     }
 }
 
-/// Server-side interceptor that extracts W3C trace context from incoming gRPC
-/// metadata and stores it in request extensions as an [`opentelemetry::Context`].
-///
-/// Downstream handlers can retrieve the context with:
-/// ```rust,ignore
-/// let parent_cx = request.extensions().get::<opentelemetry::Context>();
-/// ```
-///
-/// Requires a [`TextMapPropagator`](opentelemetry::propagation::TextMapPropagator)
-/// to be registered via [`opentelemetry::global::set_text_map_propagator`].
-#[derive(Clone, Copy, Debug, Default)]
-pub struct TraceContextExtractor;
-
-impl tonic::service::Interceptor for TraceContextExtractor {
-    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
-        let cx = opentelemetry::global::get_text_map_propagator(|propagator| {
-            propagator.extract(&MetadataExtractorRef(request.metadata()))
-        });
-        request.extensions_mut().insert(cx);
-        Ok(request)
-    }
-}
-
 /// [`Injector`] adapter for [`tonic::metadata::MetadataMap`].
-///
-/// Use this directly if you need custom propagation logic beyond the
-/// provided interceptors.
-pub struct MetadataInjector<'a>(
-    /// The metadata map to inject headers into.
-    pub &'a mut MetadataMap,
-);
+struct MetadataInjector<'a>(&'a mut tonic::metadata::MetadataMap);
 
 impl Injector for MetadataInjector<'_> {
     fn set(&mut self, key: &str, value: String) {
@@ -86,43 +55,125 @@ impl Injector for MetadataInjector<'_> {
     }
 }
 
-/// [`Extractor`] adapter for [`tonic::metadata::MetadataMap`].
-///
-/// Use this directly if you need custom propagation logic beyond the
-/// provided interceptors.
-pub struct MetadataExtractorRef<'a>(
-    /// The metadata map to extract headers from.
-    pub &'a MetadataMap,
-);
+// ---------------------------------------------------------------------------
+// Tower layer for automatic server-side span parenting
+// ---------------------------------------------------------------------------
 
-impl Extractor for MetadataExtractorRef<'_> {
-    fn get(&self, key: &str) -> Option<&str> {
-        self.0.get(key).and_then(|v| v.to_str().ok())
+#[cfg(feature = "server")]
+mod layer {
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    use opentelemetry::propagation::Extractor;
+    use tracing::Instrument;
+    use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+    /// A tower [`Layer`](tower::Layer) that extracts W3C trace context from
+    /// incoming gRPC requests and runs the inner service inside a tracing span
+    /// parented to the caller's trace.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use tonic_iroh_transport::otel::TraceContextLayer;
+    ///
+    /// let transport = TransportBuilder::new(endpoint)
+    ///     .add_rpc(TraceContextLayer.layer(MyServer::new(my_impl)))
+    ///     .spawn()
+    ///     .await?;
+    /// ```
+    #[derive(Clone, Copy, Debug, Default)]
+    pub struct TraceContextLayer;
+
+    impl TraceContextLayer {
+        /// Wrap a service so incoming requests run inside a span parented to the
+        /// caller's trace context.
+        pub fn layer<S>(&self, inner: S) -> TraceContextService<S> {
+            TraceContextService { inner }
+        }
     }
 
-    fn keys(&self) -> Vec<&str> {
-        self.0
-            .keys()
-            .filter_map(|k| match k {
-                tonic::metadata::KeyRef::Ascii(key) => Some(key.as_str()),
-                tonic::metadata::KeyRef::Binary(_) => None,
-            })
-            .collect()
+    impl<S> tower::Layer<S> for TraceContextLayer {
+        type Service = TraceContextService<S>;
+
+        fn layer(&self, inner: S) -> Self::Service {
+            TraceContextService { inner }
+        }
+    }
+
+    /// Tower service created by [`TraceContextLayer`].
+    ///
+    /// Extracts W3C trace context from HTTP headers and instruments the inner
+    /// service call with a span parented to the extracted context.
+    #[derive(Clone, Debug)]
+    pub struct TraceContextService<S> {
+        inner: S,
+    }
+
+    impl<S: tonic::server::NamedService> tonic::server::NamedService for TraceContextService<S> {
+        const NAME: &'static str = S::NAME;
+    }
+
+    impl<S, B> tower::Service<http::Request<B>> for TraceContextService<S>
+    where
+        S: tower::Service<http::Request<B>> + Clone + Send + 'static,
+        S::Future: Send + 'static,
+        B: Send + 'static,
+    {
+        type Response = S::Response;
+        type Error = S::Error;
+        type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            self.inner.poll_ready(cx)
+        }
+
+        fn call(&mut self, request: http::Request<B>) -> Self::Future {
+            let parent_cx = opentelemetry::global::get_text_map_propagator(|propagator| {
+                propagator.extract(&HeaderExtractor(request.headers()))
+            });
+
+            let span = tracing::info_span!(
+                "grpc.server",
+                otel.kind = "server",
+                rpc.method = request.uri().path(),
+            );
+            let _ = span.set_parent(parent_cx);
+
+            let clone = self.inner.clone();
+            let mut inner = std::mem::replace(&mut self.inner, clone);
+
+            Box::pin(inner.call(request).instrument(span))
+        }
+    }
+
+    /// [`Extractor`] adapter for [`http::HeaderMap`].
+    struct HeaderExtractor<'a>(&'a http::HeaderMap);
+
+    impl Extractor for HeaderExtractor<'_> {
+        fn get(&self, key: &str) -> Option<&str> {
+            self.0.get(key).and_then(|v| v.to_str().ok())
+        }
+
+        fn keys(&self) -> Vec<&str> {
+            self.0.keys().map(http::HeaderName::as_str).collect()
+        }
     }
 }
+
+#[cfg(feature = "server")]
+pub use layer::{TraceContextLayer, TraceContextService};
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opentelemetry::propagation::TextMapPropagator;
-    use opentelemetry_sdk::propagation::TraceContextPropagator;
-    use tonic::service::Interceptor;
+    use opentelemetry::propagation::Injector;
+    use tonic::metadata::MetadataMap;
 
     #[test]
     fn injector_sets_traceparent_header() {
         let mut metadata = MetadataMap::new();
-
-        // Inject a known context with a valid traceparent
         let mut injector = MetadataInjector(&mut metadata);
         injector.set(
             "traceparent",
@@ -136,76 +187,40 @@ mod tests {
     }
 
     #[test]
-    fn extractor_reads_traceparent_header() {
-        let mut metadata = MetadataMap::new();
-        metadata.insert(
-            "traceparent",
-            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
-                .parse()
-                .unwrap(),
-        );
+    fn injector_round_trip_via_interceptor() {
+        use opentelemetry::propagation::{Extractor, TextMapPropagator};
+        use opentelemetry_sdk::propagation::TraceContextPropagator;
 
-        let extractor = MetadataExtractorRef(&metadata);
-        assert_eq!(
-            extractor.get("traceparent").unwrap(),
-            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
-        );
-        assert!(extractor.keys().contains(&"traceparent"));
-    }
-
-    #[test]
-    fn round_trip_inject_extract() {
         let propagator = TraceContextPropagator::new();
-
-        // Inject a context into metadata
-        let mut metadata = MetadataMap::new();
         let traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
-        let mut inject_map = MetadataMap::new();
-        inject_map.insert("traceparent", traceparent.parse().unwrap());
 
-        // Extract a context from the injected metadata
-        let extracted_cx = propagator.extract(&MetadataExtractorRef(&inject_map));
+        // Simulate: traceparent → metadata → extract context → re-inject → verify
+        let mut src = MetadataMap::new();
+        src.insert("traceparent", traceparent.parse().unwrap());
 
-        // Re-inject the extracted context into fresh metadata
-        propagator.inject_context(&extracted_cx, &mut MetadataInjector(&mut metadata));
+        struct MapExtractor<'a>(&'a MetadataMap);
+        impl Extractor for MapExtractor<'_> {
+            fn get(&self, key: &str) -> Option<&str> {
+                self.0.get(key).and_then(|v| v.to_str().ok())
+            }
+            fn keys(&self) -> Vec<&str> {
+                self.0
+                    .keys()
+                    .filter_map(|k| match k {
+                        tonic::metadata::KeyRef::Ascii(k) => Some(k.as_str()),
+                        tonic::metadata::KeyRef::Binary(_) => None,
+                    })
+                    .collect()
+            }
+        }
 
-        // The traceparent should survive the round trip
-        assert_eq!(
-            metadata.get("traceparent").unwrap().to_str().unwrap(),
-            traceparent
-        );
-    }
+        let cx = propagator.extract(&MapExtractor(&src));
 
-    #[test]
-    fn interceptor_inject_extract_round_trip() {
-        let propagator = TraceContextPropagator::new();
-        opentelemetry::global::set_text_map_propagator(propagator);
-
-        // Simulate client-side injection
-        let mut client_request = Request::new(());
-        let traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
-        client_request
-            .metadata_mut()
-            .insert("traceparent", traceparent.parse().unwrap());
-
-        // Extract on server side
-        let mut extractor = TraceContextExtractor;
-        let server_request = extractor.call(client_request).unwrap();
-
-        // Verify the OTel context was stored in extensions
-        let cx = server_request
-            .extensions()
-            .get::<opentelemetry::Context>()
-            .expect("context should be in extensions");
-
-        // Re-inject from the extracted context
-        let mut metadata = MetadataMap::new();
-        opentelemetry::global::get_text_map_propagator(|p| {
-            p.inject_context(cx, &mut MetadataInjector(&mut metadata));
-        });
+        let mut dst = MetadataMap::new();
+        propagator.inject_context(&cx, &mut MetadataInjector(&mut dst));
 
         assert_eq!(
-            metadata.get("traceparent").unwrap().to_str().unwrap(),
+            dst.get("traceparent").unwrap().to_str().unwrap(),
             traceparent
         );
     }
