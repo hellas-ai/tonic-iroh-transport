@@ -124,7 +124,10 @@ mod tests {
 
         // Inject a known context with a valid traceparent
         let mut injector = MetadataInjector(&mut metadata);
-        injector.set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".into());
+        injector.set(
+            "traceparent",
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".into(),
+        );
 
         assert_eq!(
             metadata.get("traceparent").unwrap().to_str().unwrap(),
@@ -137,7 +140,9 @@ mod tests {
         let mut metadata = MetadataMap::new();
         metadata.insert(
             "traceparent",
-            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".parse().unwrap(),
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+                .parse()
+                .unwrap(),
         );
 
         let extractor = MetadataExtractorRef(&metadata);
