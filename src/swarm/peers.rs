@@ -1,18 +1,34 @@
-//! Peer feeds: mDNS, DHT, static lists, and peer exchange.
+//! Peer feeds: static lists, peer exchange, and optionally mDNS and DHT.
 
-use std::{pin::Pin, sync::Arc, time::Duration};
+use std::pin::Pin;
 
-use futures_util::{stream, Stream, StreamExt};
-use iroh::address_lookup::mdns::{DiscoveryEvent, MdnsAddressLookup};
+use futures_util::{Stream, StreamExt};
 use iroh::EndpointId;
-use mainline::Dht;
 use tokio::sync::broadcast;
-use tokio_stream::wrappers::{BroadcastStream, IntervalStream};
+use tokio_stream::wrappers::BroadcastStream;
+
+#[cfg(any(feature = "discovery-mdns", feature = "discovery-dht"))]
+use std::sync::Arc;
+
+#[cfg(feature = "discovery-dht")]
+use std::time::Duration;
+
+#[cfg(feature = "discovery-mdns")]
+use iroh::address_lookup::mdns::{DiscoveryEvent, MdnsAddressLookup};
+
+#[cfg(feature = "discovery-dht")]
+use mainline::Dht;
+#[cfg(feature = "discovery-dht")]
+use tokio_stream::wrappers::IntervalStream;
+#[cfg(any(feature = "discovery-mdns", feature = "discovery-dht"))]
 use tracing::{debug, trace};
 
+#[cfg(feature = "discovery-mdns")]
 use crate::user_data::{classify_user_data_alpn, UserDataAlpnMatch};
+
 use crate::Result;
 
+#[cfg(feature = "discovery-dht")]
 use super::dht::{resolver::DhtResolver, unix_minute, DHT_QUERY_CONCURRENCY, DHT_SHARD_COUNT};
 use super::discovery::DiscoveredPeer;
 
@@ -40,7 +56,12 @@ pub struct PeerFeedSpec {
 }
 
 /// Type alias for feed streams.
+#[cfg(not(target_arch = "wasm32"))]
 pub type PeerFeed = Pin<Box<dyn Stream<Item = Result<DiscoveredPeer>> + Send>>;
+
+/// Type alias for feed streams (WASM variant, no `Send` bound).
+#[cfg(target_arch = "wasm32")]
+pub type PeerFeed = Pin<Box<dyn Stream<Item = Result<DiscoveredPeer>>>>;
 
 /// Build a finite feed from static peers.
 #[must_use]
@@ -63,6 +84,7 @@ pub fn static_feed(peers: Vec<EndpointId>, priority: u8, trust: u8, scope: Scope
 }
 
 /// Build an mDNS feed scoped to a service ALPN.
+#[cfg(feature = "discovery-mdns")]
 #[must_use]
 pub fn mdns_feed(
     mdns: Arc<MdnsAddressLookup>,
@@ -104,6 +126,7 @@ pub fn mdns_feed(
 }
 
 /// Build a DHT feed (initial burst + periodic poll) for a service ALPN.
+#[cfg(feature = "discovery-dht")]
 #[must_use]
 pub fn dht_feed(
     dht: Arc<Dht>,
@@ -122,7 +145,7 @@ pub fn dht_feed(
     let burst = async_stream::try_stream! {
         for offset in [0i64, -1] {
             let minute = unix_minute(offset);
-            let queries = stream::iter(0..DHT_SHARD_COUNT)
+            let queries = futures_util::stream::iter(0..DHT_SHARD_COUNT)
                 .map({
                     let resolver = burst_resolver.clone();
                     let alpn = burst_alpn.clone();
@@ -161,7 +184,7 @@ pub fn dht_feed(
         let _ = interval.next().await;
         while interval.next().await.is_some() {
             let minute = unix_minute(0);
-            let queries = stream::iter(0..DHT_SHARD_COUNT)
+            let queries = futures_util::stream::iter(0..DHT_SHARD_COUNT)
                 .map({
                     let resolver = poll_resolver.clone();
                     let alpn = poll_alpn.clone();

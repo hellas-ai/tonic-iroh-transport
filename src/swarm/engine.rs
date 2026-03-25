@@ -36,7 +36,11 @@ impl Stream for TaggedFeed {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 type TaggedPeerFeed = Pin<Box<dyn Stream<Item = Result<Peer>> + Send>>;
+
+#[cfg(target_arch = "wasm32")]
+type TaggedPeerFeed = Pin<Box<dyn Stream<Item = Result<Peer>>>>;
 
 /// Merges multiple peer feeds into a single deduped stream.
 pub struct SwarmEngine {

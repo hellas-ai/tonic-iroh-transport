@@ -15,7 +15,7 @@ use crate::error::Result;
 use crate::server::{GrpcProtocolHandler, IrohIncoming, DEFAULT_INCOMING_BUFFER_CAPACITY};
 use crate::user_data::encode_alpns;
 
-#[cfg(feature = "discovery")]
+#[cfg(feature = "discovery-dht")]
 use crate::swarm::dht::publisher::DhtPublisher;
 
 /// Trait object to register heterogeneous tonic services.
@@ -69,7 +69,7 @@ pub struct TransportBuilder {
     services: Vec<Box<dyn AddService>>,
     alpns: Vec<Vec<u8>>,
     incoming_buffer_capacity: usize,
-    #[cfg(feature = "discovery")]
+    #[cfg(feature = "discovery-dht")]
     publisher: Option<DhtPublisher>,
 }
 
@@ -82,13 +82,13 @@ impl TransportBuilder {
             services: Vec::new(),
             alpns: Vec::new(),
             incoming_buffer_capacity: DEFAULT_INCOMING_BUFFER_CAPACITY,
-            #[cfg(feature = "discovery")]
+            #[cfg(feature = "discovery-dht")]
             publisher: None,
         }
     }
 
     /// Enable DHT publishing with a pre-configured publisher.
-    #[cfg(feature = "discovery")]
+    #[cfg(feature = "discovery-dht")]
     #[must_use]
     pub fn with_publisher(mut self, publisher: DhtPublisher) -> Self {
         self.publisher = Some(publisher);
@@ -154,7 +154,7 @@ impl TransportBuilder {
 
         let mut driver = JoinSet::new();
 
-        #[cfg(feature = "discovery")]
+        #[cfg(feature = "discovery-dht")]
         if let Some(mut publisher) = self.publisher {
             for alpn in &self.alpns {
                 publisher.add_service(alpn.clone());

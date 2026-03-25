@@ -72,7 +72,7 @@ pub(crate) mod server;
 pub mod stream;
 #[cfg(feature = "server")]
 pub mod transport;
-#[cfg(any(feature = "server", feature = "discovery"))]
+#[cfg(any(feature = "server", feature = "discovery-mdns"))]
 mod user_data;
 
 #[cfg(feature = "otel")]

@@ -41,7 +41,7 @@ pub enum Error {
     AddressLookupMetadata(String),
 
     /// DHT discovery error.
-    #[cfg(feature = "discovery")]
+    #[cfg(feature = "discovery-dht")]
     #[error("DHT discovery error: {0}")]
     DhtDiscovery(String),
 
@@ -63,7 +63,7 @@ impl Error {
     }
 
     /// Create a DHT discovery error.
-    #[cfg(feature = "discovery")]
+    #[cfg(feature = "discovery-dht")]
     pub fn dht_discovery<S: Into<String>>(msg: S) -> Self {
         Self::DhtDiscovery(msg.into())
     }

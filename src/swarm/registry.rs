@@ -2,19 +2,24 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 
-use crate::channel::IrohChannel;
 use futures_util::Stream;
 use iroh::Endpoint;
 use tonic::server::NamedService;
 
 use super::discovery::{Discovery, Peer};
 use super::engine::SwarmEngine;
-use super::locator::{Locator, LocatorConfig};
 use super::peers::PeerFeedSpec;
 use crate::alpn::service_to_alpn;
 use crate::{ConnectionPool, PoolOptions};
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::locator::{Locator, LocatorConfig};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::channel::IrohChannel;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct PoolKey {
@@ -78,6 +83,7 @@ impl ServiceRegistry {
     }
 
     /// Build a locator builder for racing connections.
+    #[cfg(not(target_arch = "wasm32"))]
     #[must_use]
     pub fn find<S: NamedService + Send + 'static>(&self) -> LocatorBuilder<'_, S> {
         LocatorBuilder::new(self)
@@ -110,6 +116,7 @@ impl ServiceRegistry {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Fluent builder to configure a locator.
 pub struct LocatorBuilder<'a, S>
 where
@@ -121,6 +128,7 @@ where
     _marker: std::marker::PhantomData<S>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a, S> LocatorBuilder<'a, S>
 where
     S: NamedService + Send + 'static,
