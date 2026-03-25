@@ -1,7 +1,9 @@
 //! Pluggable discovery backends and peer types.
 
+#[cfg(feature = "discovery-mdns")]
 use std::sync::Arc;
 
+#[cfg(feature = "discovery-mdns")]
 use iroh::address_lookup::mdns::MdnsAddressLookup;
 use iroh::EndpointId;
 use tokio::sync::broadcast;
@@ -72,7 +74,25 @@ impl Peer {
 /// Implementors produce one or more [`PeerFeedSpec`] streams for a given
 /// service ALPN. The registry calls [`feeds()`](Discovery::feeds) once per
 /// `discover()` / `find()` invocation.
+#[cfg(not(target_arch = "wasm32"))]
 pub trait Discovery: Send + Sync + 'static {
+    /// Human-readable name for logging (e.g. "dht", "mdns").
+    fn name(&self) -> &'static str;
+
+    /// Produce peer-feed specs for the given ALPN.
+    ///
+    /// Returns zero or more feeds. Some backends may not apply for
+    /// certain ALPNs, in which case they return an empty vec.
+    fn feeds(&self, alpn: &[u8]) -> Vec<PeerFeedSpec>;
+}
+
+/// A pluggable peer discovery backend.
+///
+/// Implementors produce one or more [`PeerFeedSpec`] streams for a given
+/// service ALPN. The registry calls [`feeds()`](Discovery::feeds) once per
+/// `discover()` / `find()` invocation.
+#[cfg(target_arch = "wasm32")]
+pub trait Discovery: 'static {
     /// Human-readable name for logging (e.g. "dht", "mdns").
     fn name(&self) -> &'static str;
 
@@ -89,6 +109,7 @@ pub trait Discovery: Send + Sync + 'static {
 // ---------------------------------------------------------------------------
 
 /// mDNS-based local network peer discovery backend.
+#[cfg(feature = "discovery-mdns")]
 #[derive(Clone)]
 pub struct MdnsBackend {
     mdns: Arc<MdnsAddressLookup>,
@@ -96,6 +117,7 @@ pub struct MdnsBackend {
     trust: u8,
 }
 
+#[cfg(feature = "discovery-mdns")]
 impl MdnsBackend {
     /// Create an mDNS backend wrapping the given discovery instance.
     #[must_use]
@@ -122,6 +144,7 @@ impl MdnsBackend {
     }
 }
 
+#[cfg(feature = "discovery-mdns")]
 impl Discovery for MdnsBackend {
     fn name(&self) -> &'static str {
         "mdns"

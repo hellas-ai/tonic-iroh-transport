@@ -9,7 +9,7 @@ use crate::alpn::service_to_alpn;
 use crate::{Error, Result};
 
 /// Classification for service-scoped discovery against published user-data.
-#[cfg(feature = "discovery")]
+#[cfg(feature = "discovery-mdns")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UserDataAlpnMatch {
     /// The published metadata contains the required ALPN.
@@ -43,7 +43,7 @@ fn decode_alpns(user_data: &UserData) -> Vec<Vec<u8>> {
         .unwrap_or_default()
 }
 
-#[cfg(feature = "discovery")]
+#[cfg(feature = "discovery-mdns")]
 pub(crate) fn classify_user_data_alpn(
     user_data: Option<&UserData>,
     alpn: &[u8],
@@ -81,10 +81,10 @@ mod tests {
     use super::{encode_alpns, user_data_alpns};
     use iroh::address_lookup::UserData;
 
-    #[cfg(feature = "discovery")]
+    #[cfg(feature = "discovery-mdns")]
     use super::{classify_user_data_alpn, UserDataAlpnMatch};
 
-    #[cfg(feature = "discovery")]
+    #[cfg(feature = "discovery-mdns")]
     #[test]
     fn classify_user_data_alpn_distinguishes_missing_match_and_mismatch() {
         let user_data = encode_alpns(&[b"/svc.A/1.0".to_vec(), b"/svc.B/1.0".to_vec()])
