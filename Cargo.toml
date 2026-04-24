@@ -19,14 +19,17 @@ default = ["client", "server", "native-defaults"]
 # Forwards iroh's native-only default features. Native consumers get these
 # implicitly via `default = [...]`; wasm consumers drop them by setting
 # `default-features = false` on this crate and either re-enabling
-# `native-defaults` or configuring a custom rustls `CryptoProvider` via
-# `iroh::endpoint::Builder::crypto_provider`.
+# `native-defaults` or picking just `tls-ring` / `tls-aws-lc-rs`
+# (optionally configuring their own `CryptoProvider` via
+# `iroh::endpoint::Builder::crypto_provider`).
 native-defaults = [
-    "iroh/tls-ring",
+    "tls-ring",
     "iroh/portmapper",
     "iroh/metrics",
     "iroh/fast-apple-datapath",
 ]
+tls-ring = ["iroh/tls-ring"]
+tls-aws-lc-rs = ["iroh/tls-aws-lc-rs"]
 client = [
     "dep:h2",
     "dep:http",
