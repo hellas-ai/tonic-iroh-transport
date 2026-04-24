@@ -14,7 +14,22 @@ allow-branch = ["master"]
 pre-release-hook = ["make", "all"]
 
 [features]
-default = ["client", "server"]
+default = ["client", "server", "native-defaults"]
+
+# Forwards iroh's native-only default features. Native consumers get these
+# implicitly via `default = [...]`; wasm consumers drop them by setting
+# `default-features = false` on this crate and either re-enabling
+# `native-defaults` or picking just `tls-ring` / `tls-aws-lc-rs`
+# (optionally configuring their own `CryptoProvider` via
+# `iroh::endpoint::Builder::crypto_provider`).
+native-defaults = [
+    "tls-ring",
+    "iroh/portmapper",
+    "iroh/metrics",
+    "iroh/fast-apple-datapath",
+]
+tls-ring = ["iroh/tls-ring"]
+tls-aws-lc-rs = ["iroh/tls-aws-lc-rs"]
 client = [
     "dep:h2",
     "dep:http",
@@ -63,7 +78,7 @@ discovery-dht = [
 otel = ["dep:opentelemetry", "dep:tracing-opentelemetry"]
 
 [dependencies]
-iroh = { version = "0.97" }
+iroh = { version = "0.98.1", default-features = false }
 tonic = { version = "0.14", default-features = false }
 tokio = { version = "1", default-features = false, optional = true }
 tokio-stream = { version = "0.1", default-features = false, optional = true }
@@ -71,13 +86,13 @@ h2 = { version = "0.4", optional = true }
 http = { version = "1.4", default-features = false, optional = true }
 http-body = { version = "1", optional = true }
 n0-future = { version = "0.3", optional = true }
-tower = { version = "0.4", features = ["util"], default-features = false, optional = true }
+tower = { version = "0.5", default-features = false, optional = true }
 futures-util = { version = "0.3", default-features = false }
 thiserror = { version = "2.0", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["attributes"] }
-bytes = { version = "1.8", default-features = false }
+bytes = { version = "1.11", default-features = false }
 axum = { version = "0.8", default-features = false, optional = true }
-data-encoding = { version = "2.9", default-features = false, optional = true }
+data-encoding = { version = "2.11", default-features = false, optional = true }
 
 # Mainline DHT discovery dependencies (optional)
 mainline = { version = "6", optional = true }

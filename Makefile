@@ -1,4 +1,4 @@
-.PHONY: all build check lint test examples clean install-tools help fmt fmt-examples fmt-all fmt-check fmt-check-examples fmt-check-all lint-proto
+.PHONY: all build check check-wasm lint test examples clean install-tools help fmt fmt-examples fmt-all fmt-check fmt-check-examples fmt-check-all lint-proto
 
 # Default target
 all: fmt-all check-all lint-all test-all doc-check-all build examples
@@ -17,6 +17,11 @@ build-release:
 check:
 	@echo "Checking main crate..."
 	cargo check
+
+# Check wasm32 build (mirrors the feature set consumed by the explorer frontend)
+check-wasm:
+	@echo "Checking wasm32 build..."
+	cargo check --target wasm32-unknown-unknown --no-default-features --features client,discovery
 
 # Format code
 fmt:
@@ -138,8 +143,8 @@ doc-check-examples:
 	@echo "Checking docs for echo example..."
 	cd examples/echo && cargo doc --no-deps --document-private-items
 
-# Full check including examples
-check-all: check check-examples
+# Full check including examples and wasm32
+check-all: check check-examples check-wasm
 
 # Full lint including examples and protos
 lint-all: lint lint-examples lint-proto
@@ -168,7 +173,7 @@ install-tools:
 	rustup component add rustfmt clippy
 
 # Run comprehensive checks
-ci: fmt-check-all lint-all test-all doc-check-all build examples
+ci: fmt-check-all lint-all test-all doc-check-all build check-wasm examples
 
 # Development workflow
 dev: fmt-all check lint test
@@ -180,8 +185,9 @@ help:
 	@echo "  build            - Build the main crate"
 	@echo "  build-release    - Build the main crate in release mode"
 	@echo "  check            - Check code without building"
-	@echo "  check-all        - Check main crate and examples"
+	@echo "  check-all        - Check main crate, examples, and wasm32 build"
 	@echo "  check-examples   - Check examples only"
+	@echo "  check-wasm       - Check wasm32 build with explorer's feature set"
 	@echo "  fmt              - Format main crate code"
 	@echo "  fmt-examples     - Format examples code"
 	@echo "  fmt-all          - Format main crate and examples"

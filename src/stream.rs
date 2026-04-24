@@ -39,6 +39,7 @@ pub struct IrohContext {
 pub struct IrohStream {
     send: iroh::endpoint::SendStream,
     recv: iroh::endpoint::RecvStream,
+    #[cfg_attr(not(feature = "server"), allow(dead_code))]
     context: IrohContext,
 }
 
