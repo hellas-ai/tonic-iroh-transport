@@ -11,13 +11,13 @@ use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status};
 
 use tonic_iroh_transport::iroh::{
-    address_lookup::memory::MemoryLookup, Endpoint, EndpointAddr, TransportAddr,
+    address_lookup::memory::MemoryLookup, endpoint::presets, Endpoint, EndpointAddr, TransportAddr,
 };
 use tonic_iroh_transport::{IrohConnect, TransportBuilder};
 
 // Generated proto code (checked in at tests/pb/).
 #[path = "pb/interop.v1.rs"]
-#[allow(clippy::all, missing_docs)]
+#[allow(clippy::all, clippy::pedantic, missing_docs)]
 mod pb;
 
 use pb::interop_service_client::InteropServiceClient;
@@ -127,11 +127,11 @@ fn to_localhost_addrs(addrs: Vec<SocketAddr>) -> impl Iterator<Item = TransportA
 }
 
 async fn local_endpoint() -> Endpoint {
-    Endpoint::empty_builder().bind().await.unwrap()
+    Endpoint::builder(presets::Minimal).bind().await.unwrap()
 }
 
 async fn local_endpoint_with_lookup(address_lookup: MemoryLookup) -> Endpoint {
-    Endpoint::empty_builder()
+    Endpoint::builder(presets::Minimal)
         .address_lookup(address_lookup)
         .bind()
         .await

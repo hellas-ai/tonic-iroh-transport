@@ -3,7 +3,7 @@ use std::time::Duration;
 use tokio::time::{sleep, timeout, Instant};
 use tonic_iroh_transport::iroh::{
     address_lookup::memory::MemoryLookup,
-    endpoint::Connection,
+    endpoint::{presets, Connection},
     protocol::{AcceptError, ProtocolHandler, Router},
     Endpoint, EndpointAddr, EndpointId, TransportAddr,
 };
@@ -15,11 +15,11 @@ use tonic_iroh_transport::{
 
 /// Create a local-only endpoint with relays and discovery disabled for testing.
 async fn local_endpoint() -> Endpoint {
-    Endpoint::empty_builder().bind().await.unwrap()
+    Endpoint::builder(presets::Minimal).bind().await.unwrap()
 }
 
 async fn local_endpoint_with_lookup(address_lookup: MemoryLookup) -> Endpoint {
-    Endpoint::empty_builder()
+    Endpoint::builder(presets::Minimal)
         .address_lookup(address_lookup)
         .bind()
         .await
