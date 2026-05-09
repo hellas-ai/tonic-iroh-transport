@@ -78,6 +78,14 @@ test:
 	@echo "Running tests..."
 	cargo test
 
+# Run tests with the `otel` feature so the trace-context propagation paths
+# (src/otel.rs) are actually compiled and exercised. Catches API breakages
+# from opentelemetry / tracing-opentelemetry dep bumps, which the default
+# `cargo test` would otherwise silently miss.
+test-otel:
+	@echo "Running tests (--features otel)..."
+	cargo test --features otel
+
 # Run tests with output
 test-verbose:
 	@echo "Running tests (verbose)..."
@@ -149,8 +157,8 @@ check-all: check check-examples check-wasm
 # Full lint including examples and protos
 lint-all: lint lint-examples lint-proto
 
-# Full test including examples
-test-all: test test-examples
+# Full test including examples and otel-feature path
+test-all: test test-otel test-examples
 
 # Full doc generation including examples
 doc-all: doc doc-examples
@@ -199,8 +207,9 @@ help:
 	@echo "  lint-examples    - Lint examples only"
 	@echo "  lint-proto       - Lint proto files with buf"
 	@echo "  test             - Run tests"
+	@echo "  test-otel        - Run tests with --features otel (covers src/otel.rs)"
 	@echo "  test-verbose     - Run tests with output"
-	@echo "  test-all         - Run tests for main crate and examples"
+	@echo "  test-all         - Run tests for main crate (default + otel) and examples"
 	@echo "  test-examples    - Run tests for examples only"
 	@echo "  doc              - Generate docs for main crate"
 	@echo "  doc-full         - Generate docs for main crate with dependencies"
